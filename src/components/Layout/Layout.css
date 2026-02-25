@@ -1,0 +1,20 @@
+.app-container {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(
+    90deg, 
+    #1D1A39 10%, 
+    #451952 20%, 
+    #662549 40%, 
+    #AE445A 60%, 
+    #F39F5A 80%,
+    #E8BCB9 100%
+    );
+  color: white;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.page-content {
+  padding: 60px 80px;
+  width: 100%;
+}

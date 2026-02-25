@@ -1,0 +1,178 @@
+@import url('https://fonts.googleapis.com/css2?family=Goldman:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Gruppo&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Genos:wght@300;400;500;600;700&display=swap');
+
+/* ===============================
+   PAGE WRAPPER
+================================ */
+.inst-page {
+  text-align: center;
+  margin-top: 100px;
+  padding: 0 40px 60px;
+}
+
+/* ===============================
+   TITLE
+================================ */
+.inst-title {
+  margin-top: -70px;
+  font-size: 136px;
+  font-family: 'Goldman', sans-serif;
+  font-weight: 100;
+  letter-spacing: 10px;
+
+  background: linear-gradient(90deg, #797CA4, #FFFFFF);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.inst-subtitle {
+  margin-top: -60px;
+  margin-bottom: 90px;
+  font-family: 'Gruppo', sans-serif;
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: 8px;
+  font-weight: 400;
+}
+
+/* ===============================
+   TWO-CARD GRID
+================================ */
+.inst-grid {
+  display: flex;
+  justify-content: center;
+  gap: 80px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+/* ===============================
+   GLASS CARD
+================================ */
+.inst-card {
+  width: 950px;
+  min-height: 700px;
+  padding: 50px 45px;
+  border-radius: 40px;
+
+  background: linear-gradient(
+    145deg,
+    rgba(255,255,255,0.16),
+    rgba(255,255,255,0.06)
+  );
+
+  border: 1px solid rgba(255,255,255,0.18);
+
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+
+  box-shadow:
+    0 20px 45px rgba(0,0,0,0.28),
+    inset 0 18px 26px rgba(255,255,255,0.10),
+    inset 0 -18px 28px rgba(0,0,0,0.22);
+
+  text-align: left;
+
+  transition: 
+    transform 0.35s cubic-bezier(.2,.8,.2,1),
+    box-shadow 0.35s ease,
+    border 0.35s ease;
+}
+
+/* POP OUT EFFECT */
+.inst-card:hover {
+  transform: translateY(-14px) scale(1.04);
+
+  border: 1px solid rgba(255,255,255,0.35);
+
+  box-shadow:
+    0 35px 80px rgba(0,0,0,0.45),
+    0 0 40px rgba(121,124,164,0.25),
+    inset 0 18px 26px rgba(255,255,255,0.15),
+    inset 0 -18px 28px rgba(0,0,0,0.25);
+}
+
+/* ===============================
+   CARD HEADING
+================================ */
+.card-heading {
+  font-family: 'Gruppo', sans-serif;
+  font-size: 32px;
+  letter-spacing: 6px;
+  margin-bottom: 35px;
+  text-align: center;
+}
+
+/* ===============================
+   LIST STYLING
+================================ */
+.inst-list {
+  margin: 0;
+  padding-left: 24px;
+  line-height: 2.2;
+  letter-spacing: 1px;
+  font-size: 30px;
+  font-family: 'Genos', sans-serif;
+}
+
+/* ===============================
+   SLIDE-IN ANIMATION
+================================ */
+.inst-card:nth-child(1) {
+  animation: slideLeft 0.8s ease forwards;
+}
+
+.inst-card:nth-child(2) {
+  animation: slideRight 0.8s ease forwards;
+}
+
+@keyframes slideLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-80px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideRight {
+  from {
+    opacity: 0;
+    transform: translateX(80px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ===============================
+   RESPONSIVE DESIGN
+================================ */
+@media (max-width: 1400px) {
+  .inst-card {
+    width: 90%;
+  }
+}
+
+@media (max-width: 900px) {
+  .inst-title {
+    margin-top: 0;
+  }
+
+  .inst-grid {
+    gap: 50px;
+  }
+
+  .inst-card {
+    padding: 40px 30px;
+  }
+
+  .inst-list {
+    font-size: 18px;
+  }
+}

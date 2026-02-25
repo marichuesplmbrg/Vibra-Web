@@ -1,0 +1,78 @@
+@import url("https://fonts.googleapis.com/css2?family=Goldman:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Gruppo&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Genos:wght@300;400;500;600;700&display=swap");
+
+.simulation-page {
+  width: 100%;
+  padding: 54px 40px 34px;
+  text-align: center;
+  margin-top: 50px;
+}
+
+/* Page width wrapper */
+.sim-slide {
+  width: min(2500px, 100vw);
+  margin: 0 auto;
+}
+
+/* ---------- BOTTOM CONTROLS ---------- */
+.sim-controls {
+  width: min(1250px, 100vw);
+  margin: 50px auto 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+
+.sim-arrow {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 22px;
+  cursor: pointer;
+
+  box-shadow: 0 16px 26px rgba(0, 0, 0, 0.22),
+    inset 0 12px 18px rgba(255, 255, 255, 0.08);
+}
+
+.sim-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sim-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.sim-dot.on {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* Shared animation */
+.simulation-page.enter .glass-card {
+  animation: simCardIn 0.9s ease both;
+}
+
+@keyframes simCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

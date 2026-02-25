@@ -1,0 +1,265 @@
+@import url('https://fonts.googleapis.com/css2?family=Goldman:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Gruppo&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Genos:wght@300;400;500;600;700&display=swap');
+
+/* ===============================
+   PAGE WRAPPER
+================================ */
+.about-container {
+  text-align: center;
+  margin-top: 100px;
+  padding: 0 60px;
+}
+
+/* ===============================
+   TITLE
+================================ */
+.about-container h1 {
+  margin-top: -70px;
+  font-size: 136px;
+  font-family: 'Goldman', sans-serif;
+  font-weight: 100;
+  letter-spacing: 10px;
+
+  background: linear-gradient(90deg, #797CA4, #FFFFFF);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  
+  opacity: 0;
+  transform: translateY(-50px);
+}
+
+.about-container h3 {
+  margin-top: -60px;
+  margin-bottom: 80px;
+  font-family: 'Gruppo', sans-serif;
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: 6px;
+  font-weight: 400;
+
+  opacity: 0;
+  transform: translateY(50px);
+}
+
+.about-container.enter h1 {
+  animation: titleDrop 1s ease forwards;
+}
+
+.about-container.enter h3 {
+  animation: subtitleRise 1s ease forwards;
+  animation-delay: 0.2s;
+}
+
+/* ===============================
+   CONTENT LAYOUT
+================================ */
+.about-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center; /* vertical center */
+  gap: 80px;
+}
+
+.about-text {
+  flex: 1.2;
+}
+
+/* ===============================
+   PARAGRAPHS
+================================ */
+.about-paragraph {
+  text-align: left;
+  max-width: 1400px;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  line-height: 2;
+  font-size: 28px;
+  font-family: 'Genos', sans-serif;
+
+  opacity: 0;
+  transform: translateX(-60px);
+}
+
+.about-container.enter .about-paragraph {
+  animation: slideIn 0.8s ease forwards;
+}
+
+.about-container.enter .p1 { animation-delay: 0.1s; }
+.about-container.enter .p2 { animation-delay: 0.3s; }
+.about-container.enter .p3 { animation-delay: 0.5s; }
+
+@keyframes slideIn {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ===============================
+   PARAGRAPH POP EFFECT
+================================ */
+.para-inner {
+  display: block;
+  border-radius: 18px;
+  padding: 16px 20px;
+  transition: 
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease;
+}
+
+.para-inner:hover {
+  transform: scale(1.04);
+  background: rgba(255,255,255,0.06);
+  box-shadow:
+    0 15px 40px rgba(0,0,0,0.35),
+    inset 0 2px 8px rgba(255,255,255,0.2);
+}
+
+/* ===============================
+   SIDE CTA BUTTON (MATCH HOME)
+================================ */
+
+/* ===============================
+   CTA SIDE (RIGHT, CENTERED)
+================================ */
+.about-cta-side {
+  flex: 0.6;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ===============================
+   CIRCLE → EXPAND BUTTON
+================================ */
+.about-cta-btn {
+  width: 100px;
+  height: 100px;
+  text-align: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.22);
+
+  background: linear-gradient(
+    360deg,
+    #b1a498,
+    #b59aaa55,
+    #b7c4ce52,
+    #0f2d4d0a
+  );
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  box-shadow:
+    0 18px 45px rgba(0,0,0,0.35),
+    inset 0 3px 10px rgba(255,255,255,0.20),
+    inset 0 -6px 16px rgba(0,0,0,0.22);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  cursor: pointer;
+  overflow: hidden;
+
+  transition:
+    width 0.35s cubic-bezier(.2,.8,.2,1),
+    transform 0.35s cubic-bezier(.2,.8,.2,1),
+    box-shadow 0.35s ease,
+    border 0.35s ease;
+}
+
+/* Arrow centered in circle */
+.cta-arrow {
+  font-size: 50px;
+  line-height: 10;
+  color: rgba(255,255,255,0.92);
+
+  transition: transform 0.35s cubic-bezier(.2,.8,.2,1);
+}
+
+/* Hidden text by default */
+.cta-text {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+
+  margin-left: 0;
+
+  font-family: "Genos", sans-serif;
+  font-size: 32px;
+  color: rgba(255,255,255,0.92);
+
+  transform: translateX(-10px);
+
+  transition:
+    opacity 0.25s ease,
+    max-width 0.35s cubic-bezier(.2,.8,.2,1),
+    transform 0.35s cubic-bezier(.2,.8,.2,1),
+    margin-left 0.35s cubic-bezier(.2,.8,.2,1);
+}
+
+/* Hover → expand to pill and reveal text */
+.about-cta-btn:hover {
+  width: 380px;
+  justify-content: flex-start;
+  padding: 0 30px;
+  transform: translateY(-6px) scale(1.03);
+
+  border: 1px solid rgba(255,255,255,0.32);
+
+  box-shadow:
+    0 28px 75px rgba(0,0,0,0.45),
+    0 0 38px rgba(121,124,164,0.18),
+    inset 0 3px 12px rgba(255,255,255,0.22),
+    inset 0 -8px 18px rgba(0,0,0,0.24);
+}
+
+/* Move arrow slightly right on hover (still near left) */
+.about-cta-btn:hover .cta-arrow {
+  transform: translateX(6px);
+}
+
+/* Reveal text */
+.about-cta-btn:hover .cta-text {
+  opacity: 1;
+  max-width: 260px;
+  margin-left: 14px;
+  transform: translateX(0);
+}
+
+/* ===============================
+   RESPONSIVE
+================================ */
+@media (max-width: 1200px) {
+  .about-content {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .about-cta-side {
+    margin-top: 60px;
+  }
+
+  .about-paragraph {
+    font-size: 22px;
+  }
+}
+
+@keyframes titleDrop {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes subtitleRise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

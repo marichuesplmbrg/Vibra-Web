@@ -1,0 +1,297 @@
+@import url('https://fonts.googleapis.com/css2?family=Goldman:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Gruppo&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Genos:wght@300;400;500;600;700&display=swap');
+
+/* =============================
+   PAGE CONTAINER
+============================= */
+.team-container {
+  margin-top: 100px;
+  text-align: center;
+  padding: 0 40px 80px;
+}
+
+/* =============================
+   TITLES
+============================= */
+.team-title {
+  margin-top: -70px;
+  font-size: 136px;
+  font-family: 'Goldman', sans-serif;
+  font-weight: 100;
+  letter-spacing: 10px;
+
+  background: linear-gradient(90deg, #797CA4, #FFFFFF);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+
+  opacity: 0;
+  transform: translateY(-50px);
+}
+
+.team-subtitle {
+  margin-top: -60px;
+  margin-bottom: 120px;
+  font-family: 'Gruppo', sans-serif;
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: 6px;
+  font-weight: 400;
+
+  opacity: 0;
+  transform: translateY(50px);
+}
+
+.team-container.enter .team-title {
+  animation: teamTitleDrop 1s ease forwards;
+}
+
+.team-container.enter .team-subtitle {
+  animation: teamSubtitleRise 1s ease forwards;
+  animation-delay: 0.2s;
+}
+
+/* =============================
+   GRID LAYOUT
+============================= */
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 350px);
+  gap: 100px;
+  width: max-content;
+  margin: 0 auto;
+}
+
+.team-member {
+  display: flex;
+  justify-content: center;
+}
+
+/* =============================
+   FLIP CARD
+============================= */
+.flip-card {
+  width: 345px;
+  height: 380px;
+  perspective: 1200px;
+}
+
+.flip-inner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transition: transform 0.8s ease;
+  transform-style: preserve-3d;
+}
+
+.flip-card:hover .flip-inner {
+  transform: rotateY(180deg);
+}
+
+.flip-front,
+.flip-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 40px;
+  backface-visibility: hidden;
+  overflow: hidden;
+}
+
+/* FRONT (PHOTO) */
+.flip-front {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  border: 1px solid rgba(255, 255, 255, 0.14);
+
+  box-shadow:
+    inset 0 0 20px rgba(0, 0, 0, 0.4),
+    0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* BACK (INFO) */
+.flip-back {
+  transform: rotateY(180deg);
+
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  padding: 20px;
+
+  background: linear-gradient(
+    360deg,
+    #b1a498,
+    #b59aaa55,
+    #b7c4ce52,
+    #0f2d4d0a
+  );
+
+  color: white;
+
+  box-shadow:
+    inset 0 2px 8px rgba(255, 255, 255, 0.2),
+    inset 0 -2px 10px rgba(0, 0, 0, 0.25),
+    0 8px 22px rgba(0, 0, 0, 0.2);
+}
+
+.team-name {
+  font-size: 18px;
+  letter-spacing: 2px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.team-role {
+  font-size: 15px;
+  letter-spacing: 3px;
+  opacity: 0.85;
+}
+
+/* =============================
+   CTA BUTTON (CIRCLE → EXPAND)
+============================= */
+.team-cta-down {
+  position: fixed;
+  bottom: 110px;
+  right: 350px;
+  z-index: 1100;
+}
+
+.team-cta-btn {
+  width: 100px;
+  height: 100px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.22);
+
+  background: linear-gradient(
+    360deg,
+    #b1a498,
+    #b59aaa55,
+    #b7c4ce52,
+    #0f2d4d0a
+  );
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  box-shadow:
+    0 18px 45px rgba(0,0,0,0.35),
+    inset 0 3px 10px rgba(255,255,255,0.20),
+    inset 0 -6px 16px rgba(0,0,0,0.22);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  cursor: pointer;
+  overflow: hidden;
+
+  transition:
+    width 0.35s cubic-bezier(.2,.8,.2,1),
+    transform 0.35s cubic-bezier(.2,.8,.2,1),
+    box-shadow 0.35s ease,
+    border 0.35s ease;
+}
+
+/* Arrow centered */
+.team-cta-arrow {
+  font-size: 40px;
+  line-height: 1;
+  color: rgba(255,255,255,0.92);
+  transition: transform 0.35s cubic-bezier(.2,.8,.2,1);
+}
+
+/* Hidden text */
+.team-cta-text {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+
+  margin-left: 0;
+
+  font-family: "Genos", sans-serif;
+  font-size: 26px;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,0.92);
+
+  transform: translateX(-10px);
+
+  transition:
+    opacity 0.25s ease,
+    max-width 0.35s cubic-bezier(.2,.8,.2,1),
+    transform 0.35s cubic-bezier(.2,.8,.2,1),
+    margin-left 0.35s cubic-bezier(.2,.8,.2,1);
+}
+
+/* Hover expand */
+.team-cta-btn:hover {
+  width: 420px;
+  justify-content: flex-start;
+  padding: 0 30px;
+  transform: translateY(-6px) scale(1.03);
+
+  border: 1px solid rgba(255,255,255,0.32);
+
+  box-shadow:
+    0 28px 75px rgba(0,0,0,0.45),
+    0 0 38px rgba(121,124,164,0.18),
+    inset 0 3px 12px rgba(255,255,255,0.22),
+    inset 0 -8px 18px rgba(0,0,0,0.24);
+}
+
+.team-cta-btn:hover .team-cta-arrow {
+  transform: translateX(6px);
+}
+
+.team-cta-btn:hover .team-cta-text {
+  opacity: 1;
+  max-width: 300px;
+  margin-left: 14px;
+  transform: translateX(0);
+}
+
+/* =============================
+   RESPONSIVE
+============================= */
+@media (max-width: 1400px) {
+  .team-grid {
+    grid-template-columns: repeat(3, minmax(200px, 1fr));
+    width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .team-grid {
+    grid-template-columns: repeat(2, minmax(200px, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .team-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .team-cta-btn:hover {
+    width: 100%;
+  }
+}
+
+@keyframes teamTitleDrop {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes teamSubtitleRise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
