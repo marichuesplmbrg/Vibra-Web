@@ -7,10 +7,8 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
 /**
  * ✅ Put these files here:
- *  - src/assets/pad_2.stl
- *  - src/assets/Protoype-stripped.stl   (yes, your filename has Protoype)
- *
- * If you stored them somewhere else, update the ../../assets paths below accordingly.
+ *  - public/models/pad_2.stl
+ *  - public/models/Protoype-stripped.stl   (yes, your filename has Protoype)
  */
 const PAD_URL = "/models/pad_2.stl";
 const PROTOTYPE_URL = "/models/Protoype-stripped.stl";
@@ -114,6 +112,136 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
 }
 
 /* =========================
+   MEASUREMENT GRID (CM)
+   - minor lines every 10cm
+   - major lines every 50cm
+   - labels printed ON grid lines
+   - 0 cm starts at prototype position
+========================= */
+
+// ✅ plain text (no box), printed flat on the floor
+function makeFloorTextMesh(text, { fontSize = 56 } = {}) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = 256;
+  canvas.height = 128;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.font = `bold ${fontSize}px Arial`;
+  ctx.fillStyle = "rgba(0, 229, 255, 0.95)"; // cyan
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+  });
+
+  // small plane
+  const geo = new THREE.PlaneGeometry(0.18, 0.09);
+  const mesh = new THREE.Mesh(geo, mat);
+
+  // lay flat on floor
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.renderOrder = 10;
+
+  return mesh;
+}
+
+function addMeasurementGridCm({
+  parent,
+  lengthM,
+  widthM,
+  originX = 0,
+  originZ = 0,
+  minorCm = 10,
+  majorCm = 50,
+  y = 0.002,
+}) {
+  const group = new THREE.Group();
+  group.name = "MeasurementGridCM";
+
+  const halfL = lengthM / 2;
+  const halfW = widthM / 2;
+
+  const minorM = minorCm / 100;
+  const majorM = majorCm / 100;
+
+  const minorMat = new THREE.LineBasicMaterial({
+    color: 0x00c8ff,
+    transparent: true,
+    opacity: 0.18,
+  });
+
+  const majorMat = new THREE.LineBasicMaterial({
+    color: 0x00e5ff,
+    transparent: true,
+    opacity: 0.6,
+  });
+
+  const makeLine = (x1, z1, x2, z2, mat) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x1, y, z1),
+      new THREE.Vector3(x2, y, z2),
+    ]);
+    const line = new THREE.Line(geo, mat);
+    line.renderOrder = 1;
+    return line;
+  };
+
+  const isMajor = (from0, step) => {
+    const n = from0 / step;
+    return Math.abs(n - Math.round(n)) < 1e-6;
+  };
+
+  // grid lines
+  for (let x = -halfL; x <= halfL + 1e-6; x += minorM) {
+    const from0 = x + halfL;
+    group.add(makeLine(x, -halfW, x, halfW, isMajor(from0, majorM) ? majorMat : minorMat));
+  }
+  for (let z = -halfW; z <= halfW + 1e-6; z += minorM) {
+    const from0 = z + halfW;
+    group.add(makeLine(-halfL, z, halfL, z, isMajor(from0, majorM) ? majorMat : minorMat));
+  }
+
+  // ✅ labels ON the grid lines and 0 cm starts at prototype position
+  const labelY = y + 0.004; // tiny lift to avoid z-fighting
+  const labelLineZ = THREE.MathUtils.clamp(originZ, -halfW, halfW);
+  const labelLineX = THREE.MathUtils.clamp(originX, -halfL, halfL);
+
+  // X labels on z = originZ
+  for (let x = -halfL; x <= halfL + 1e-6; x += majorM) {
+    const cmFromOrigin = Math.round((x - originX) * 100);
+    const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
+    t.position.set(x, labelY, labelLineZ);
+    group.add(t);
+  }
+
+  // Z labels on x = originX
+  for (let z = -halfW; z <= halfW + 1e-6; z += majorM) {
+    const cmFromOrigin = Math.round((z - originZ) * 100);
+    const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
+    t.position.set(labelLineX, labelY, z);
+    t.rotation.z = Math.PI / 2;
+    group.add(t);
+  }
+
+  parent.add(group);
+  return group;
+}
+
+/* =========================
    SLIDE2
 ========================= */
 export default function Slide2({ rowsFor3D, spatial }) {
@@ -165,12 +293,14 @@ function ThreeRoom({ rowsFor3D, spatial }) {
   const mountRef = useRef(null);
   const [tip, setTip] = useState({ show: false, x: 0, y: 0, text: "" });
 
-  // ✅ status overlay (helps debug)
   const [status, setStatus] = useState("Initializing 3D…");
 
   // ✅ tick to force rebuild after STL loads
   const [padReadyTick, setPadReadyTick] = useState(0);
   const [protoReadyTick, setProtoReadyTick] = useState(0);
+
+  // ✅ measurement origin (0 cm) anchored to prototype position
+  const [measureOrigin, setMeasureOrigin] = useState({ x: 0, z: 0 });
 
   const threeRef = useRef({
     renderer: null,
@@ -199,27 +329,33 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     fallbackBox: null,
   });
 
+  // glow animation
+  const glowPadsRef = useRef([]);
+  const clockRef = useRef(new THREE.Clock());
+
   const matsRef = useRef({
     hot: new THREE.MeshStandardMaterial({
-      color: 0xb22222,
-      emissive: 0xb22222,
-      emissiveIntensity: 0.85,
+      color: 0x7c0a02,
+      emissive: 0x7c0a02,
+      emissiveIntensity: 0.55,
       roughness: 0.35,
       metalness: 0.05,
     }),
     dead: new THREE.MeshStandardMaterial({
-      color: 0x4292c6,
-      emissive: 0x4292c6,
-      emissiveIntensity: 0.85,
+      color: 0x0e4c92,
+      emissive: 0x0e4c92,
+      emissiveIntensity: 0.55,
       roughness: 0.35,
       metalness: 0.05,
     }),
     neutral: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.25,
+      color: 0xf0f0f0,
+      emissive: 0xf0f0f0,
+      emissiveIntensity: 0.12,
       roughness: 0.55,
       metalness: 0.02,
+      transparent: false,
+      opacity: 1,
     }),
     floor: new THREE.MeshStandardMaterial({
       color: 0xdddddd,
@@ -244,7 +380,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const mount = mountRef.current;
     if (!mount) return;
 
-    // ✅ IMPORTANT: if mount height is 0, you will see nothing
     const w = mount.clientWidth;
     const h = mount.clientHeight;
     if (!w || !h) {
@@ -347,6 +482,25 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const loop = () => {
       raf = requestAnimationFrame(loop);
       controls.update();
+
+      // glow animation
+      const t = clockRef.current.getElapsedTime();
+      for (const mesh of glowPadsRef.current) {
+        const mat = mesh?.material;
+        if (!mat) continue;
+
+        const phase = mesh.userData?.glowPhase ?? 0;
+        const wave = 0.5 + 0.5 * Math.sin(t * 2.2 + phase);
+
+        const cls = normClass(getField(mesh.userData?.row, "Classification") ?? "neutral");
+        const strong = cls.includes("hot") || cls.includes("dead");
+
+        const base = strong ? 0.35 : 0.08;
+        const amp = strong ? 0.55 : 0.18;
+
+        mat.emissiveIntensity = base + amp * wave;
+      }
+
       renderer.render(scene, camera);
     };
     loop();
@@ -359,11 +513,17 @@ function ThreeRoom({ rowsFor3D, spatial }) {
       controls.dispose();
       renderer.dispose();
       if (renderer.domElement && mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
+
+      glowPadsRef.current.forEach((m) => {
+        if (m?.material?.dispose) m.material.dispose();
+        if (m?.geometry?.dispose) m.geometry.dispose();
+      });
+      glowPadsRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------- ROOM ---------- */
+  /* ---------- ROOM (measurement grid cm + walls) ---------- */
   useEffect(() => {
     const { roomGroup } = threeRef.current;
     if (!roomGroup) return;
@@ -374,10 +534,12 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const widthM = spatial?.widthM ?? 3;
     const heightM = spatial?.heightM ?? 2.6;
 
+    // floor
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(lengthM, widthM), matsRef.current.floor);
     floor.rotation.x = -Math.PI / 2;
     roomGroup.add(floor);
 
+    // walls
     const thickness = 0.05;
     const wallMat = matsRef.current.wall;
 
@@ -397,41 +559,43 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     wall4.position.set(lengthM / 2, heightM / 2, 0);
     roomGroup.add(wall4);
 
-    const maxDim = Math.max(lengthM, widthM);
-    const grid = new THREE.GridHelper(maxDim, Math.max(10, Math.round(maxDim / 0.1)));
-    grid.position.y = 0.001;
-    roomGroup.add(grid);
-  }, [spatial]);
+    // ✅ measurement grid with origin at prototype position
+    addMeasurementGridCm({
+      parent: roomGroup,
+      lengthM,
+      widthM,
+      originX: measureOrigin.x,
+      originZ: measureOrigin.z,
+      minorCm: 10,
+      majorCm: 50,
+      y: 0.002,
+    });
+  }, [spatial, measureOrigin]);
 
-  /* ---------- LOAD PAD (forces rebuild on success) ---------- */
+  /* ---------- LOAD PAD ---------- */
   useEffect(() => {
     if (padRef.current.ready) return;
 
     setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
     const loader = new STLLoader();
-
     console.log("[Pad] loading:", PAD_URL);
 
     loader.load(
       PAD_URL,
       (geom) => {
-        console.log("[Pad] loaded ✅");
         const upright = orientGeometryUpright(geom);
         const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
         padRef.current.geom = prepared;
         padRef.current.baseScale = scale;
         padRef.current.ready = true;
 
-        // ✅ trigger rebuild
         setPadReadyTick((t) => t + 1);
         setStatus("pad_2.stl loaded ✅");
       },
       undefined,
       (err) => {
         console.error("[Pad] load failed ❌", err);
-        setStatus(
-          `FAILED to load pad_2.stl. Open DevTools > Network and check if ${PAD_URL} is 404.`
-        );
+        setStatus(`FAILED to load pad_2.stl. Check DevTools > Network if ${PAD_URL} is 404.`);
       }
     );
   }, []);
@@ -442,7 +606,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     if (!protoGroup) return;
     if (protoRef.current.loaded) return;
 
-    // fallback so you see something
     const fallback = new THREE.Mesh(
       new THREE.BoxGeometry(0.25, 0.25, 0.25),
       new THREE.MeshStandardMaterial({ color: 0xf58727 })
@@ -457,7 +620,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     loader.load(
       PROTOTYPE_URL,
       (geom) => {
-        console.log("[Prototype] loaded ✅");
         const upright = orientGeometryUpright(geom);
         const { geom: prepared, scale } = groundCenterAndScale(upright, 1.8);
 
@@ -470,29 +632,25 @@ function ThreeRoom({ rowsFor3D, spatial }) {
         protoRef.current.mesh = mesh;
         protoRef.current.loaded = true;
 
-        // ✅ trigger rebuild (so it repositions to centroid)
         setProtoReadyTick((t) => t + 1);
       },
       undefined,
       (err) => {
         console.error("[Prototype] load failed ❌", err);
-        setStatus(
-          `FAILED to load Prototype. Check if ${PROTOTYPE_URL} is 404 in DevTools > Network.`
-        );
+        setStatus(`FAILED to load Prototype. Check DevTools > Network if ${PROTOTYPE_URL} is 404.`);
       }
     );
   }, []);
 
-  /* ---------- BUILD PADS (now depends on padReadyTick ✅) ---------- */
+  /* ---------- BUILD PADS ---------- */
   useEffect(() => {
     const { padsGroup, camera, controls } = threeRef.current;
     if (!padsGroup || !camera || !controls) return;
 
     padsGroup.clear();
+    glowPadsRef.current = [];
 
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
-    console.log("[3D] rowsFor3D count:", rows.length);
-
     if (!rows.length) {
       setStatus("No data rows to deploy.");
       return;
@@ -531,7 +689,7 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const centroid = new THREE.Vector3(0, 0, 0);
     let count = 0;
 
-    const PAD_WORLD_SIZE = 0.22; // adjust size
+    const PAD_WORLD_SIZE = 0.22;
     const LAYER_STEP = 0.45;
     const BASE_Y = 0.02;
 
@@ -565,20 +723,26 @@ function ThreeRoom({ rowsFor3D, spatial }) {
       count++;
 
       const cls = normClass(getField(row, "Classification") ?? "neutral");
-      const mat =
+      const baseMat =
         cls.includes("hot")
           ? matsRef.current.hot
           : cls.includes("dead")
           ? matsRef.current.dead
           : matsRef.current.neutral;
 
+      const mat = baseMat.clone();
+      mat.transparent = false;
+      mat.opacity = 1;
+
       const padMesh = new THREE.Mesh(padRef.current.geom.clone(), mat);
       const finalScale = padRef.current.baseScale * PAD_WORLD_SIZE;
       padMesh.scale.setScalar(finalScale);
 
       padMesh.position.set(x, y, z);
-      padMesh.userData = { row, index };
+      padMesh.userData = { row, index, glowPhase: Math.random() * Math.PI * 2 };
+
       padsGroup.add(padMesh);
+      glowPadsRef.current.push(padMesh);
     });
 
     // prototype to centroid
@@ -589,9 +753,12 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     if (protoRef.current.mesh) protoRef.current.mesh.position.set(px, 0, pz);
     else if (protoRef.current.fallbackBox) protoRef.current.fallbackBox.position.set(px, 0.125, pz);
 
+    // ✅ measurement must start at prototype position
+    setMeasureOrigin({ x: px, z: pz });
+
     // camera framing
-    const roomWidth = (east - west) + 0.6;
-    const roomDepth = (north - south) + 0.6;
+    const roomWidth = east - west + 0.6;
+    const roomDepth = north - south + 0.6;
     const cx = (east + west) / 2;
     const cz = (north + south) / 2;
 
@@ -605,7 +772,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>
-      {/* ✅ status overlay */}
       <div
         style={{
           position: "absolute",
@@ -618,7 +784,7 @@ function ThreeRoom({ rowsFor3D, spatial }) {
           fontSize: 12,
           zIndex: 30,
           pointerEvents: "none",
-          maxWidth: 320,
+          maxWidth: 360,
         }}
       >
         {status}
