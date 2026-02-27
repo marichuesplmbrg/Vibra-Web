@@ -10,6 +10,9 @@ const prototypeUrl = new URL(
   import.meta.url
 ).href;
 
+/* =========================
+   HELPERS
+========================= */
 const norm = (v) =>
   String(v ?? "")
     .replace(/\uFEFF/g, "")
@@ -18,14 +21,9 @@ const norm = (v) =>
     .toLowerCase();
 
 function toNumber(value) {
+  // Works with "0", "0°", " 90 ", etc.
   const n = Number(String(value ?? "").replace(/[^\d.\-]/g, ""));
   return Number.isFinite(n) ? n : null;
-}
-
-function toMetersAssumeCm(val) {
-  const n = toNumber(val);
-  if (n == null) return null;
-  return n / 100;
 }
 
 function downloadCSV(filename, rows) {
@@ -52,6 +50,34 @@ function downloadCSV(filename, rows) {
   document.body.removeChild(link);
 }
 
+/* =========================
+   SPATIAL (LAYER 1 ONLY)
+   LengthCm = U(0) + U(180)
+   WidthCm  = U(90) + U(270)
+========================= */
+const normalizeDeg = (deg) => {
+  if (deg == null) return null;
+  return ((deg % 360) + 360) % 360;
+};
+
+const snapCardinal = (deg, tol = 3) => {
+  if (deg == null) return null;
+  const d = normalizeDeg(deg);
+  const cardinals = [0, 90, 180, 270];
+
+  let best = null;
+  let bestDiff = Infinity;
+
+  for (const c of cardinals) {
+    const diff = Math.min(Math.abs(d - c), 360 - Math.abs(d - c));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = c;
+    }
+  }
+  return bestDiff <= tol ? best : null;
+};
+
 export default function Simulation() {
   const slides = useMemo(() => [0, 1], []);
   const [slide, setSlide] = useState(0);
@@ -71,6 +97,7 @@ export default function Simulation() {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [sortValue, setSortValue] = useState(null);
 
+  // ✅ rows shown on table (filters + search)
   const displayedRows = useMemo(() => {
     let rows = [...rawRows];
 
@@ -80,47 +107,61 @@ export default function Simulation() {
       if (kind === "class") {
         const target = norm(val).replace(/[\s\-]+/g, "");
         rows = rows.filter(
-          (r) =>
-            norm(String(r.Classification)).replace(/[\s\-]+/g, "") === target
+          (r) => norm(String(r.Classification)).replace(/[\s\-]+/g, "") === target
         );
       }
     }
 
     if (appliedSearch.trim()) {
       const q = norm(appliedSearch);
-      rows = rows.filter((r) =>
-        Object.values(r).some((v) => norm(v).includes(q))
-      );
+      rows = rows.filter((r) => Object.values(r).some((v) => norm(v).includes(q)));
     }
 
     return rows;
   }, [rawRows, appliedSearch, sortValue]);
 
+  // ✅ SPATIAL: use ONLY Layer 1 ultrasonic angles for L/W
   const spatial = useMemo(() => {
-    const lwRow =
-      rawRows.find(
-        (r) =>
-          String(r.LengthRaw ?? "").trim() !== "" ||
-          String(r.WidthRaw ?? "").trim() !== ""
-      ) || null;
+    const layer1 = rawRows.filter((r) => norm(r.Layer) === norm("Layer 1"));
 
-    const hRow =
-      rawRows.find((r) => String(r.HeightRaw ?? "").trim() !== "") || null;
+    const buckets = { 0: [], 90: [], 180: [], 270: [] };
 
-    const lengthM = lwRow ? toMetersAssumeCm(lwRow.LengthRaw) : null;
-    const widthM = lwRow ? toMetersAssumeCm(lwRow.WidthRaw) : null;
-    const heightM = hRow ? toMetersAssumeCm(hRow.HeightRaw) : null;
+    for (const r of layer1) {
+      const snapped = snapCardinal(toNumber(r.Angle), 3);
+      if (snapped == null) continue;
 
+      const cm = toNumber(r.Ultrasonic);
+      if (cm != null) buckets[snapped].push(cm);
+    }
+
+    // First value found at each cardinal angle (Layer 1)
+    const u0 = buckets[0][0] ?? null;
+    const u180 = buckets[180][0] ?? null;
+    const u90 = buckets[90][0] ?? null;
+    const u270 = buckets[270][0] ?? null;
+
+    // ✅ EXACT RULES:
+    const lengthCm = u0 != null && u180 != null ? u0 + u180 : null;
+    const widthCm = u90 != null && u270 != null ? u90 + u270 : null;
+
+    // Height: first available (cm)
+    const hRow = rawRows.find((r) => String(r.HeightRaw ?? "").trim() !== "") || null;
+    const heightRaw = hRow?.HeightRaw ?? "";
+
+    // Area in m²
+    const lengthM = lengthCm == null ? null : lengthCm / 100;
+    const widthM = widthCm == null ? null : widthCm / 100;
     const area = lengthM != null && widthM != null ? lengthM * widthM : null;
     const qualified = area != null ? area >= 3 && area <= 5 : null;
 
     return {
-      lengthM,
-      widthM,
-      heightM,
-      heightRaw: hRow?.HeightRaw ?? "",
+      lengthCm,
+      widthCm,
+      heightRaw,
       area,
       qualified,
+      // optional: for debugging
+      debug: { u0, u180, u90, u270 },
     };
   }, [rawRows]);
 
@@ -137,7 +178,6 @@ export default function Simulation() {
     setSlide(0);
   };
 
-  // ✅ Snapshot EXACTLY what you see in the table
   const deploy = () => {
     setDeployedRows(displayedRows);
     setSlide(1);
@@ -165,11 +205,7 @@ export default function Simulation() {
           setUploadStatus={setUploadStatus}
         />
       ) : (
-        <Slide2
-          rowsFor3D={deployedRows}   // ✅ spheres = 1 per row
-          spatial={spatial}
-          prototypeUrl={prototypeUrl}
-        />
+        <Slide2 rowsFor3D={deployedRows} spatial={spatial} prototypeUrl={prototypeUrl} />
       )}
 
       <div className="sim-controls">
@@ -183,11 +219,7 @@ export default function Simulation() {
           ))}
         </div>
 
-        <button
-          className="sim-arrow"
-          onClick={goNext}
-          disabled={slide === slides.length - 1}
-        >
+        <button className="sim-arrow" onClick={goNext} disabled={slide === slides.length - 1}>
           ›
         </button>
       </div>

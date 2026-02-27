@@ -214,7 +214,7 @@
   display: block;
   padding: 10px 16px;
   font-family: "Genos", sans-serif;
-  font-size: 22px;
+  font-size: 25px;
   color: rgba(255, 255, 255, 0.92);
   letter-spacing: 1px;
 }
@@ -243,7 +243,7 @@
 .status-inner {
   padding: 18px;
   font-family: "Genos", sans-serif;
-  font-size: 22px;
+  font-size: 25px;
   color: rgba(255, 255, 255, 0.92);
 }
 
@@ -255,7 +255,7 @@
 
 .status-hint {
   margin-top: 14px;
-  font-size: 18px;
+  font-size: 28px;
   opacity: 0.85;
 }
 

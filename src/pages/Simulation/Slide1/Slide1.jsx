@@ -119,10 +119,7 @@ export default function Slide1({
 
   useEffect(() => {
     if (uploadStatus.type === "idle") return;
-    const timer = setTimeout(
-      () => setUploadStatus({ type: "idle", message: "" }),
-      5000
-    );
+    const timer = setTimeout(() => setUploadStatus({ type: "idle", message: "" }), 5000);
     return () => clearTimeout(timer);
   }, [uploadStatus, setUploadStatus]);
 
@@ -139,13 +136,8 @@ export default function Slide1({
         const res = await fetch(sheetCsvUrl(layer.gid), { redirect: "follow" });
         const text = await res.text();
 
-        if (
-          text.toLowerCase().includes("<html") ||
-          text.toLowerCase().includes("<!doctype")
-        ) {
-          throw new Error(
-            `Sheet ${layer.label} is not publicly accessible as CSV.`
-          );
+        if (text.toLowerCase().includes("<html") || text.toLowerCase().includes("<!doctype")) {
+          throw new Error(`Sheet ${layer.label} is not publicly accessible as CSV.`);
         }
 
         const sheetRows = parseCSV(text);
@@ -193,18 +185,12 @@ export default function Slide1({
     if (!file) return;
 
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      setUploadStatus({
-        type: "error",
-        message: "CSV only. Please upload a .csv file.",
-      });
+      setUploadStatus({ type: "error", message: "CSV only. Please upload a .csv file." });
       event.target.value = "";
       return;
     }
 
-    setUploadStatus({
-      type: "loading",
-      message: "Uploading data from local CSV...",
-    });
+    setUploadStatus({ type: "loading", message: "Uploading data from local CSV..." });
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -252,24 +238,18 @@ export default function Slide1({
     setShowSort(false);
   };
 
-  const formatM = (m) => (m == null ? "—" : `${m.toFixed(2)} m`);
+  const formatCm = (cm) => (cm == null ? "—" : `${cm.toFixed(1)} cm`);
   const formatArea = (a) => (a == null ? "—" : `${a.toFixed(2)} m²`);
 
   const statusText =
-    spatial.qualified == null
-      ? "—"
-      : spatial.qualified
-      ? "Qualified"
-      : "Not Qualified";
+    spatial.qualified == null ? "—" : spatial.qualified ? "Qualified" : "Not Qualified";
 
   return (
     <div className="sim-slide sim-slide-1">
       <h1 className="sim-title">SIMULATION</h1>
 
       {uploadStatus.type !== "idle" && (
-        <div
-          className={`upload-toast upload-toast--floating ${uploadStatus.type}`}
-        >
+        <div className={`upload-toast upload-toast--floating ${uploadStatus.type}`}>
           {uploadStatus.message}
           <button
             className="upload-toast-close"
@@ -314,43 +294,25 @@ export default function Slide1({
 
               {showSort && (
                 <div className="sort-dropdown">
-                  <button
-                    type="button"
-                    onClick={() => chooseSort("layer:Layer 1")}
-                  >
+                  <button type="button" onClick={() => chooseSort("layer:Layer 1")}>
                     Layer 1
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => chooseSort("layer:Layer 2")}
-                  >
+                  <button type="button" onClick={() => chooseSort("layer:Layer 2")}>
                     Layer 2
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => chooseSort("layer:Layer 3")}
-                  >
+                  <button type="button" onClick={() => chooseSort("layer:Layer 3")}>
                     Layer 3
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => chooseSort("layer:Layer 4")}
-                  >
+                  <button type="button" onClick={() => chooseSort("layer:Layer 4")}>
                     Layer 4
                   </button>
 
                   <div className="sort-divider" />
 
-                  <button
-                    type="button"
-                    onClick={() => chooseSort("class:hotspot")}
-                  >
+                  <button type="button" onClick={() => chooseSort("class:hotspot")}>
                     Hot Spot
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => chooseSort("class:deadspot")}
-                  >
+                  <button type="button" onClick={() => chooseSort("class:deadspot")}>
                     Dead Spot
                   </button>
 
@@ -413,10 +375,7 @@ export default function Slide1({
                     <button type="button" onClick={handleImportCloud}>
                       Cloud
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
+                    <button type="button" onClick={() => fileInputRef.current?.click()}>
                       Local
                     </button>
                   </div>
@@ -431,21 +390,11 @@ export default function Slide1({
                 />
               </div>
 
-              <button
-                className="action-btn"
-                type="button"
-                onClick={onExport}
-                disabled={!displayedRows.length}
-              >
+              <button className="action-btn" type="button" onClick={onExport} disabled={!displayedRows.length}>
                 Export
               </button>
 
-              <button
-                className="action-btn"
-                type="button"
-                onClick={onDeploy}
-                disabled={!displayedRows.length}
-              >
+              <button className="action-btn" type="button" onClick={onDeploy} disabled={!displayedRows.length}>
                 Deploy
               </button>
             </div>
@@ -463,11 +412,13 @@ export default function Slide1({
           <p className="label">PHYSICAL DIMENSION:</p>
 
           <div className="dimension-input">
-            <span className="dimension-text">Length: {formatM(spatial.lengthM)}</span>
+            <span className="dimension-text">Length: {formatCm(spatial.lengthCm)}</span>
           </div>
+
           <div className="dimension-input">
-            <span className="dimension-text">Width: {formatM(spatial.widthM)}</span>
+            <span className="dimension-text">Width: {formatCm(spatial.widthCm)}</span>
           </div>
+
           <div className="dimension-input">
             <span className="dimension-text">
               Height: {spatial.heightRaw ? `${spatial.heightRaw} cm` : "—"}

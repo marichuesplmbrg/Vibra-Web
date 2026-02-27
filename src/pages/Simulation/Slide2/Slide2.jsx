@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./Slide2.css";
 
 import * as THREE from "three";
@@ -113,10 +113,6 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
 
 /* =========================
    MEASUREMENT GRID (CM)
-   - minor lines every 10cm
-   - major lines every 50cm
-   - labels printed ON grid lines
-   - 0 cm starts at prototype position
 ========================= */
 
 // ✅ plain text (no box), printed flat on the floor
@@ -130,7 +126,7 @@ function makeFloorTextMesh(text, { fontSize = 56 } = {}) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   ctx.font = `bold ${fontSize}px Arial`;
-  ctx.fillStyle = "rgba(0, 229, 255, 0.95)"; // cyan
+  ctx.fillStyle = "rgba(0, 229, 255, 0.95)";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -148,14 +144,10 @@ function makeFloorTextMesh(text, { fontSize = 56 } = {}) {
     side: THREE.DoubleSide,
   });
 
-  // small plane
   const geo = new THREE.PlaneGeometry(0.18, 0.09);
   const mesh = new THREE.Mesh(geo, mat);
-
-  // lay flat on floor
   mesh.rotation.x = -Math.PI / 2;
   mesh.renderOrder = 10;
-
   return mesh;
 }
 
@@ -205,7 +197,6 @@ function addMeasurementGridCm({
     return Math.abs(n - Math.round(n)) < 1e-6;
   };
 
-  // grid lines
   for (let x = -halfL; x <= halfL + 1e-6; x += minorM) {
     const from0 = x + halfL;
     group.add(makeLine(x, -halfW, x, halfW, isMajor(from0, majorM) ? majorMat : minorMat));
@@ -215,12 +206,11 @@ function addMeasurementGridCm({
     group.add(makeLine(-halfL, z, halfL, z, isMajor(from0, majorM) ? majorMat : minorMat));
   }
 
-  // ✅ labels ON the grid lines and 0 cm starts at prototype position
-  const labelY = y + 0.004; // tiny lift to avoid z-fighting
+  const labelY = y + 0.004;
   const labelLineZ = THREE.MathUtils.clamp(originZ, -halfW, halfW);
   const labelLineX = THREE.MathUtils.clamp(originX, -halfL, halfL);
 
-  // X labels on z = originZ
+  // X labels
   for (let x = -halfL; x <= halfL + 1e-6; x += majorM) {
     const cmFromOrigin = Math.round((x - originX) * 100);
     const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
@@ -228,7 +218,7 @@ function addMeasurementGridCm({
     group.add(t);
   }
 
-  // Z labels on x = originX
+  // Z labels
   for (let z = -halfW; z <= halfW + 1e-6; z += majorM) {
     const cmFromOrigin = Math.round((z - originZ) * 100);
     const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
@@ -242,45 +232,514 @@ function addMeasurementGridCm({
 }
 
 /* =========================
+   WALL RULERS (CM)
+========================= */
+function makeWallTextMesh(text, { fontSize = 54 } = {}) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = 256;
+  canvas.height = 128;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = `bold ${fontSize}px Arial`;
+  ctx.fillStyle = "rgba(0, 229, 255, 0.95)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+  });
+
+  const geo = new THREE.PlaneGeometry(0.18, 0.09);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 10;
+  return mesh;
+}
+
+function addWallRulersCm({
+  parent,
+  lengthM,
+  widthM,
+  heightM,
+  wallThickness = 0.05,
+  minorCm = 10,
+  majorCm = 50,
+  surfaceOffset = 0.002,
+}) {
+  const group = new THREE.Group();
+  group.name = "WallRulersCM";
+
+  const minorM = minorCm / 100;
+  const majorM = majorCm / 100;
+
+  const minorMat = new THREE.LineBasicMaterial({
+    color: 0x00c8ff,
+    transparent: true,
+    opacity: 0.25,
+  });
+
+  const majorMat = new THREE.LineBasicMaterial({
+    color: 0x00e5ff,
+    transparent: true,
+    opacity: 0.7,
+  });
+
+  const makeLine = (a, b, mat) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+    const line = new THREE.Line(geo, mat);
+    line.renderOrder = 2;
+    return line;
+  };
+
+  const isMajor = (valM) => {
+    const n = valM / majorM;
+    return Math.abs(n - Math.round(n)) < 1e-6;
+  };
+
+  const halfL = lengthM / 2;
+  const halfW = widthM / 2;
+
+  const zWall = -halfW + wallThickness / 2 + surfaceOffset;
+
+  // A) HEIGHT ruler (vertical)
+  {
+    const xRuler = -halfL + 0.12;
+    for (let y = 0; y <= heightM + 1e-6; y += minorM) {
+      const major = isMajor(y);
+      const tickLen = major ? 0.18 : 0.1;
+
+      group.add(
+        makeLine(
+          new THREE.Vector3(xRuler, y, zWall),
+          new THREE.Vector3(xRuler + tickLen, y, zWall),
+          major ? majorMat : minorMat
+        )
+      );
+
+      if (major) {
+        const cm = Math.round(y * 100);
+        const t = makeWallTextMesh(`${cm} cm`, { fontSize: 54 });
+        t.position.set(xRuler + tickLen + 0.12, y, zWall);
+        group.add(t);
+      }
+    }
+  }
+
+  // B) LENGTH ruler (horizontal)
+  {
+    const yRuler = 0.22;
+    for (let x = -halfL; x <= halfL + 1e-6; x += minorM) {
+      const fromLeft = x + halfL;
+      const major = isMajor(fromLeft);
+      const tickLen = major ? 0.16 : 0.09;
+
+      group.add(
+        makeLine(
+          new THREE.Vector3(x, yRuler, zWall),
+          new THREE.Vector3(x, yRuler + tickLen, zWall),
+          major ? majorMat : minorMat
+        )
+      );
+
+      if (major) {
+        const cm = Math.round(fromLeft * 100);
+        const t = makeWallTextMesh(`${cm} cm`, { fontSize: 54 });
+        t.position.set(x, yRuler + tickLen + 0.1, zWall);
+        t.rotation.z = Math.PI / 2;
+        group.add(t);
+      }
+    }
+  }
+
+  parent.add(group);
+  return group;
+}
+
+/* =========================
+   RECOMMENDATION CONTENT
+========================= */
+const TREATMENT = {
+  hotspot: {
+    title: "Hotspot Treatment",
+    what: [
+      "A hotspot is a part of the room where sound becomes too strong or “focuses” in one area.",
+      "It can happen when reflections and low-frequency build-up collect at certain points (commonly corners or near walls).",
+      "Your data detects hotspot based on the measured parameters and classification output from the system.",
+    ],
+    fixed: {
+      key: "bass_trap",
+      label: "Bass Trap (Recommended)",
+      desc:
+        "Bass traps help reduce low-frequency build-up and smooth the room response. They are usually placed in corners and wall–ceiling corners where bass energy collects.",
+      options: [
+        {
+          name: "Rockwool / Mineral Wool Corner Bass Trap",
+          text:
+            "Common DIY/pro option. Materials are widely available in PH hardware suppliers; many builders also sell ready-made corner traps online.",
+        },
+        {
+          name: "Foam Corner Bass Trap (Acoustic Foam)",
+          text:
+            "Easy to buy (PH e-commerce). Works mainly on mid/high-bass compared to thick wool traps, but still helps for basic control.",
+        },
+        {
+          name: "Panel Bass Trap (Thick Broadband Panels)",
+          text:
+            "Thicker wall panels placed at corners/first reflections. Often sold locally by acoustic treatment shops and custom builders.",
+        },
+        {
+          name: "Tube / Cylindrical Bass Trap",
+          text:
+            "Portable and repositionable. Some local sellers offer cylindrical traps; can also be custom-made by upholstery/wood shops.",
+        },
+      ],
+      footnote: "Tip: Corner placement usually gives the biggest improvement for hotspots caused by low-frequency build-up.",
+    },
+  },
+
+  deadspot: {
+    title: "Deadspot Treatment",
+    what: [
+      "A deadspot is a part of the room that feels weak, dull, or “missing detail.”",
+      "It can happen when reflections cancel out or when the space becomes overly absorptive in certain areas.",
+      "Your data detects deadspot based on the measured parameters and classification output from the system.",
+    ],
+    fixed: {
+      key: "diffuser",
+      label: "Diffuser (Recommended)",
+      desc:
+        "Diffusers scatter reflections instead of removing them. This helps make the room feel more natural and balanced, improving spaciousness without adding strong echo.",
+      options: [
+        {
+          name: "QRD Diffuser (1D)",
+          text: "Common studio diffuser type. Available via local acoustic builders and custom wood shops in PH.",
+        },
+        {
+          name: "Skyline Diffuser (2D)",
+          text:
+            "Scatters sound in many directions. Often made-to-order locally; some ready-made options appear on PH marketplaces.",
+        },
+        {
+          name: "Poly / Curved Diffuser",
+          text: "Smooth scattering (good for small rooms). Usually custom-made using plywood/curved panels by local fabricators.",
+        },
+        {
+          name: "Slat / Hybrid Diffuser Panel",
+          text: "Hybrid look (wood slats + backing). Common in PH interior builds; can be ordered from acoustic/interior contractors.",
+        },
+      ],
+      footnote: "Tip: Rear wall diffusion often helps deadspots by restoring useful reflections without making the room harsh.",
+    },
+  },
+};
+
+/* =========================
    SLIDE2
 ========================= */
 export default function Slide2({ rowsFor3D, spatial }) {
+  const hasData = Array.isArray(rowsFor3D) && rowsFor3D.length > 0;
+
+  const [focusClass, setFocusClass] = useState("all"); // all | hotspot | deadspot
+  const [showGuide, setShowGuide] = useState(false);
+
+  // per-type applied state
+  const [applied, setApplied] = useState({ hotspot: false, deadspot: false });
+
+  // before/after view
+  const [viewMode, setViewMode] = useState("before"); // before | after
+
+  const counts = useMemo(() => {
+    const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
+    let hot = 0,
+      dead = 0,
+      neutral = 0;
+    for (const r of rows) {
+      const cls = normClass(getField(r, "Classification") ?? "");
+      if (cls.includes("hot")) hot++;
+      else if (cls.includes("dead")) dead++;
+      else neutral++;
+    }
+    return { hot, dead, neutral, total: rows.length };
+  }, [rowsFor3D]);
+
+  const filteredRows = useMemo(() => {
+    const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
+    if (focusClass === "all") return rows;
+
+    const want = focusClass === "hotspot" ? "hot" : "dead";
+    return rows.filter((r) => normClass(getField(r, "Classification")).includes(want));
+  }, [rowsFor3D, focusClass]);
+
+  // clean UX: when changing focus, return to BEFORE view
+  useEffect(() => {
+    setViewMode("before");
+  }, [focusClass]);
+
+  const activeTreat =
+    focusClass === "hotspot"
+      ? TREATMENT.hotspot
+      : focusClass === "deadspot"
+      ? TREATMENT.deadspot
+      : null;
+
+  const isApplied =
+    focusClass === "hotspot"
+      ? applied.hotspot
+      : focusClass === "deadspot"
+      ? applied.deadspot
+      : false;
+
+  const canTreat = hasData && focusClass !== "all";
+
+  const applyTreatment = () => {
+    if (!canTreat) return;
+    setApplied((prev) => {
+      if (focusClass === "hotspot") return { ...prev, hotspot: true };
+      if (focusClass === "deadspot") return { ...prev, deadspot: true };
+      return prev;
+    });
+    setViewMode("after");
+  };
+
   return (
     <div className="sim-slide sim-slide-2">
       <div className="sim-row sim-row-2">
+        {/* LEFT: 3D */}
         <div className="glass-card glass-card--bigLeft">
           <div className="sim3d-card sim3d-card--three">
-            <ThreeRoom rowsFor3D={rowsFor3D} spatial={spatial} />
+            <ThreeRoom
+              rowsFor3D={filteredRows}
+              spatial={spatial}
+              focusClass={focusClass}
+              viewMode={viewMode}
+              isApplied={isApplied}
+            />
 
+            {/* LEGEND (clickable) */}
             <div className="three-legend">
-              <div className="three-legend-title">Legend</div>
-              <div className="three-legend-row">
-                <span className="swatch swatch-hot" /> Hotspot
-              </div>
-              <div className="three-legend-row">
-                <span className="swatch swatch-dead" /> Deadspot
-              </div>
-              <div className="three-legend-row">
-                <span className="swatch swatch-neutral" /> Neutral
-              </div>
-              <div className="three-legend-row" style={{ opacity: 0.75 }}>
+              <div className="three-legend-title">Legend (Click to filter)</div>
+
+              <button
+                type="button"
+                className={`legend-btn ${focusClass === "hotspot" ? "on" : ""}`}
+                onClick={() => setFocusClass("hotspot")}
+                disabled={!hasData}
+                title={!hasData ? "Deploy data first in Slide 1" : "Show hotspots only"}
+              >
+                <span className="swatch swatch-hot" /> Hotspot ({counts.hot})
+              </button>
+
+              <button
+                type="button"
+                className={`legend-btn ${focusClass === "deadspot" ? "on" : ""}`}
+                onClick={() => setFocusClass("deadspot")}
+                disabled={!hasData}
+                title={!hasData ? "Deploy data first in Slide 1" : "Show deadspots only"}
+              >
+                <span className="swatch swatch-dead" /> Deadspot ({counts.dead})
+              </button>
+
+              <button
+                type="button"
+                className={`legend-btn ${focusClass === "all" ? "on" : ""}`}
+                onClick={() => setFocusClass("all")}
+                disabled={!hasData}
+                title={!hasData ? "Deploy data first in Slide 1" : "Show all pads"}
+              >
+                <span className="swatch swatch-neutral" /> All ({counts.total})
+              </button>
+
+              <div className="three-legend-row" style={{ opacity: 0.85 }}>
                 Hover a pad to view details
               </div>
-              <div className="three-legend-row" style={{ opacity: 0.75 }}>
+              <div className="three-legend-row" style={{ opacity: 0.85 }}>
                 Layer 1 (bottom) → Layer 4 (top)
               </div>
             </div>
           </div>
         </div>
 
+        {/* RIGHT: RECOMMENDATION (APPLIED) */}
         <div className="glass-card glass-card--recommend">
           <h2 className="card-title card-title--recommend">RECOMMENDATION</h2>
+
           <div className="recommend-inner">
-            <div className="recommend-search" />
-            <div className="recommend-scroll">
-              <div className="recommend-space" />
+            {/* Toolbar */}
+            <div className="recommend-toolbar">
+              <button
+                type="button"
+                className={`guide-btn ${showGuide ? "on" : ""}`}
+                onClick={() => setShowGuide((v) => !v)}
+              >
+                {showGuide ? "Hide Guide" : "Guide"}
+              </button>
+
+              <div className="recommend-mini">
+                {hasData ? (
+                  <>
+                    Showing <b>{filteredRows.length}</b> pad(s)
+                  </>
+                ) : (
+                  <>No deployed data</>
+                )}
+              </div>
             </div>
+
+            {/* Guide (collapsible) */}
+            {showGuide && (
+              <div className="guide-card">
+                <div className="guide-title">How to use Slide 2</div>
+                <ol className="guide-list">
+                  <li>
+                    Go to Slide 1 → Import CSV → then click <b>Deploy</b>.
+                  </li>
+                  <li>
+                    In Slide 2, click <b>Hotspot</b> or <b>Deadspot</b> (Legend or buttons).
+                  </li>
+                  <li>Read the treatment recommendation.</li>
+                  <li>
+                    Click <b>Apply Treatment</b> to preview the “After” view in 3D.
+                  </li>
+                  <li>
+                    Use <b>Before / After</b> to compare.
+                  </li>
+                </ol>
+                <div className="guide-note">
+                  Note: Treatment preview is a visual indicator (green pads) to help users understand changes.
+                </div>
+              </div>
+            )}
+
+            {/* If NO deployed data yet */}
+            {!hasData ? (
+              <div className="info-card">
+                <div className="info-title">No data detected</div>
+                <div className="info-text">
+                  Please import and deploy your data in <b>Slide 1</b> first.
+                  <br />
+                  After deploying, this panel will show hotspot/deadspot explanations and treatment options.
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* What are hotspot/deadspot */}
+                <div className="info-card" style={{ marginBottom: 16 }}>
+                  <div className="info-title">What are Hotspot and Deadspot?</div>
+                  <div className="info-text">
+                    <b>Hotspot</b> = sound energy becomes too strong in a specific area (often due to reflections + build-up).
+                    <br />
+                    <b>Deadspot</b> = sound feels weak/dull in a specific area (often due to cancellations or uneven reflections).
+                    <br />
+                    These are detected from your measured parameters and the system’s classification result.
+                  </div>
+                </div>
+
+                {/* Selection */}
+                <div className="select-card">
+                  <div className="select-title">
+                    What you want to select: <b>Hotspot</b> or <b>Deadspot</b>?
+                  </div>
+
+                  <div className="select-actions">
+                    <button type="button" className="select-btn" onClick={() => setFocusClass("hotspot")}>
+                      Select Hotspot
+                    </button>
+                    <button type="button" className="select-btn" onClick={() => setFocusClass("deadspot")}>
+                      Select Deadspot
+                    </button>
+                    <button type="button" className="select-btn" onClick={() => setFocusClass("all")}>
+                      Show All
+                    </button>
+                  </div>
+
+                  <div className="select-hint">You can also click the Legend inside the 3D panel.</div>
+                </div>
+
+                {/* Treatment */}
+                {focusClass === "all" ? (
+                  <div className="info-card">
+                    <div className="info-title">Select one to continue</div>
+                    <div className="info-text">
+                      Choose <b>Hotspot</b> or <b>Deadspot</b> to show the recommended treatment and apply preview.
+                    </div>
+                  </div>
+                ) : (
+                  activeTreat && (
+                    <div className="treat-card">
+                      <div className="treat-title">{activeTreat.title}</div>
+                      <div className="treat-sub">
+                        Showing <b>{filteredRows.length}</b> pad(s) in 3D
+                      </div>
+
+                      <div className="treat-main">
+                        <div className="treat-badge">{activeTreat.fixed.label}</div>
+                        <div className="treat-desc">{activeTreat.fixed.desc}</div>
+                      </div>
+
+                      <div className="treat-actions">
+                        <button
+                          type="button"
+                          className="apply-btn"
+                          onClick={applyTreatment}
+                          disabled={isApplied}
+                          title={isApplied ? "Treatment already applied" : "Apply and preview After"}
+                        >
+                          {isApplied ? "Applied ✓" : "Apply Treatment"}
+                        </button>
+
+                        <div className="compare-toggle">
+                          <button
+                            type="button"
+                            className={`compare-btn ${viewMode === "before" ? "on" : ""}`}
+                            onClick={() => setViewMode("before")}
+                          >
+                            Before
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-btn ${viewMode === "after" ? "on" : ""}`}
+                            onClick={() => setViewMode("after")}
+                            disabled={!isApplied}
+                            title={!isApplied ? "Apply treatment to enable After view" : "View treated preview"}
+                          >
+                            After
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="recommend-card" style={{ marginTop: 14 }}>
+                        <div className="recommend-card-title">Available Types (PH-friendly)</div>
+
+                        <div className="recommend-list" style={{ marginTop: 10 }}>
+                          {activeTreat.fixed.options.map((o) => (
+                            <div className="recommend-item" key={o.name}>
+                              <div className="recommend-item-name">{o.name}</div>
+                              <div className="recommend-item-text">{o.text}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="treat-footnote">{activeTreat.fixed.footnote}</div>
+                      </div>
+                    </div>
+                  )
+                )}
+              </>
+            )}
           </div>
+
+          {/* Keep your rails if you want (optional). Remove if not used in CSS. */}
           <div className="scroll-rail" />
           <div className="scroll-thumb" />
         </div>
@@ -289,13 +748,14 @@ export default function Slide2({ rowsFor3D, spatial }) {
   );
 }
 
-function ThreeRoom({ rowsFor3D, spatial }) {
+/* =========================
+   THREE ROOM
+========================= */
+function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
   const mountRef = useRef(null);
   const [tip, setTip] = useState({ show: false, x: 0, y: 0, text: "" });
-
   const [status, setStatus] = useState("Initializing 3D…");
 
-  // ✅ tick to force rebuild after STL loads
   const [padReadyTick, setPadReadyTick] = useState(0);
   const [protoReadyTick, setProtoReadyTick] = useState(0);
 
@@ -329,10 +789,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     fallbackBox: null,
   });
 
-  // glow animation
-  const glowPadsRef = useRef([]);
-  const clockRef = useRef(new THREE.Clock());
-
   const matsRef = useRef({
     hot: new THREE.MeshStandardMaterial({
       color: 0x7c0a02,
@@ -356,6 +812,14 @@ function ThreeRoom({ rowsFor3D, spatial }) {
       metalness: 0.02,
       transparent: false,
       opacity: 1,
+    }),
+    // ✅ After/treatment preview color
+    treated: new THREE.MeshStandardMaterial({
+      color: 0x2ecc71,
+      emissive: 0x2ecc71,
+      emissiveIntensity: 0.45,
+      roughness: 0.45,
+      metalness: 0.02,
     }),
     floor: new THREE.MeshStandardMaterial({
       color: 0xdddddd,
@@ -384,7 +848,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const h = mount.clientHeight;
     if (!w || !h) {
       setStatus("3D mount has 0 width/height. Fix CSS height of .three-mount.");
-      console.warn("[3D] mount size is 0:", { w, h });
       return;
     }
 
@@ -395,7 +858,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-
     const camera = new THREE.PerspectiveCamera(60, w / h, 0.05, 200);
     camera.position.set(0, 2.5, 4);
 
@@ -482,25 +944,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const loop = () => {
       raf = requestAnimationFrame(loop);
       controls.update();
-
-      // glow animation
-      const t = clockRef.current.getElapsedTime();
-      for (const mesh of glowPadsRef.current) {
-        const mat = mesh?.material;
-        if (!mat) continue;
-
-        const phase = mesh.userData?.glowPhase ?? 0;
-        const wave = 0.5 + 0.5 * Math.sin(t * 2.2 + phase);
-
-        const cls = normClass(getField(mesh.userData?.row, "Classification") ?? "neutral");
-        const strong = cls.includes("hot") || cls.includes("dead");
-
-        const base = strong ? 0.35 : 0.08;
-        const amp = strong ? 0.55 : 0.18;
-
-        mat.emissiveIntensity = base + amp * wave;
-      }
-
       renderer.render(scene, camera);
     };
     loop();
@@ -513,33 +956,31 @@ function ThreeRoom({ rowsFor3D, spatial }) {
       controls.dispose();
       renderer.dispose();
       if (renderer.domElement && mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
-
-      glowPadsRef.current.forEach((m) => {
-        if (m?.material?.dispose) m.material.dispose();
-        if (m?.geometry?.dispose) m.geometry.dispose();
-      });
-      glowPadsRef.current = [];
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ✅ MUST be empty so hover does not re-init three.js
   }, []);
 
-  /* ---------- ROOM (measurement grid cm + walls) ---------- */
+  /* ---------- ROOM (USES YOUR LENGTH/WIDTH FROM 0/180 and 90/270) ---------- */
   useEffect(() => {
     const { roomGroup } = threeRef.current;
     if (!roomGroup) return;
 
     roomGroup.clear();
 
-    const lengthM = spatial?.lengthM ?? 3;
-    const widthM = spatial?.widthM ?? 3;
-    const heightM = spatial?.heightM ?? 2.6;
+    // lengthCm = U(0)+U(180), widthCm = U(90)+U(270)
+    const lengthM =
+      spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
 
-    // floor
+    const widthM =
+      spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
+
+    const heightCm = toNumber(spatial?.heightRaw);
+    const heightM = heightCm != null ? heightCm / 100 : 2.6;
+
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(lengthM, widthM), matsRef.current.floor);
     floor.rotation.x = -Math.PI / 2;
     roomGroup.add(floor);
 
-    // walls
     const thickness = 0.05;
     const wallMat = matsRef.current.wall;
 
@@ -559,7 +1000,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     wall4.position.set(lengthM / 2, heightM / 2, 0);
     roomGroup.add(wall4);
 
-    // ✅ measurement grid with origin at prototype position
     addMeasurementGridCm({
       parent: roomGroup,
       lengthM,
@@ -570,6 +1010,17 @@ function ThreeRoom({ rowsFor3D, spatial }) {
       majorCm: 50,
       y: 0.002,
     });
+
+    addWallRulersCm({
+      parent: roomGroup,
+      lengthM,
+      widthM,
+      heightM,
+      wallThickness: thickness,
+      minorCm: 10,
+      majorCm: 50,
+      surfaceOffset: 0.002,
+    });
   }, [spatial, measureOrigin]);
 
   /* ---------- LOAD PAD ---------- */
@@ -578,7 +1029,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
 
     setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
     const loader = new STLLoader();
-    console.log("[Pad] loading:", PAD_URL);
 
     loader.load(
       PAD_URL,
@@ -600,7 +1050,7 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     );
   }, []);
 
-  /* ---------- LOAD PROTOTYPE (optional) ---------- */
+  /* ---------- LOAD PROTOTYPE ---------- */
   useEffect(() => {
     const { protoGroup } = threeRef.current;
     if (!protoGroup) return;
@@ -615,7 +1065,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     protoRef.current.fallbackBox = fallback;
 
     const loader = new STLLoader();
-    console.log("[Prototype] loading:", PROTOTYPE_URL);
 
     loader.load(
       PROTOTYPE_URL,
@@ -648,7 +1097,6 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     if (!padsGroup || !camera || !controls) return;
 
     padsGroup.clear();
-    glowPadsRef.current = [];
 
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
     if (!rows.length) {
@@ -663,17 +1111,18 @@ function ThreeRoom({ rowsFor3D, spatial }) {
 
     setStatus(`Deploying ${rows.length} pads…`);
 
-    const lengthM = spatial?.lengthM ?? 3;
-    const widthM = spatial?.widthM ?? 3;
+    const lengthM =
+      spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
+    const widthM =
+      spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
 
     const margin = 0.18;
     const halfL = lengthM / 2 - margin;
     const halfW = widthM / 2 - margin;
 
     const maxDistCm =
-      Math.max(
-        ...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)
-      ) || 0;
+      Math.max(...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)) ||
+      0;
 
     const SPREAD = maxDistCm >= 20 ? 1 : 30;
 
@@ -692,6 +1141,9 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     const PAD_WORLD_SIZE = 0.22;
     const LAYER_STEP = 0.45;
     const BASE_Y = 0.02;
+
+    const selectedType =
+      focusClass === "hotspot" ? "hot" : focusClass === "deadspot" ? "dead" : null;
 
     rows.forEach((row, index) => {
       const angleDeg = toNumber(getField(row, "Angle"));
@@ -723,29 +1175,30 @@ function ThreeRoom({ rowsFor3D, spatial }) {
       count++;
 
       const cls = normClass(getField(row, "Classification") ?? "neutral");
-      const baseMat =
+
+      // BEFORE base materials
+      let baseMat =
         cls.includes("hot")
           ? matsRef.current.hot
           : cls.includes("dead")
           ? matsRef.current.dead
           : matsRef.current.neutral;
 
-      const mat = baseMat.clone();
-      mat.transparent = false;
-      mat.opacity = 1;
+      // AFTER: if applied + after view + selectedType matches this pad
+      if (viewMode === "after" && isApplied && selectedType && cls.includes(selectedType)) {
+        baseMat = matsRef.current.treated;
+      }
 
-      const padMesh = new THREE.Mesh(padRef.current.geom.clone(), mat);
+      const padMesh = new THREE.Mesh(padRef.current.geom.clone(), baseMat);
       const finalScale = padRef.current.baseScale * PAD_WORLD_SIZE;
       padMesh.scale.setScalar(finalScale);
 
       padMesh.position.set(x, y, z);
-      padMesh.userData = { row, index, glowPhase: Math.random() * Math.PI * 2 };
-
+      padMesh.userData = { row, index };
       padsGroup.add(padMesh);
-      glowPadsRef.current.push(padMesh);
     });
 
-    // prototype to centroid
+    // prototype at centroid
     const c = count ? centroid.multiplyScalar(1 / count) : new THREE.Vector3(0, 0, 0);
     const px = THREE.MathUtils.clamp(c.x, -halfL + 0.2, halfL - 0.2);
     const pz = THREE.MathUtils.clamp(c.z, -halfW + 0.2, halfW - 0.2);
@@ -753,7 +1206,7 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     if (protoRef.current.mesh) protoRef.current.mesh.position.set(px, 0, pz);
     else if (protoRef.current.fallbackBox) protoRef.current.fallbackBox.position.set(px, 0.125, pz);
 
-    // ✅ measurement must start at prototype position
+    // measurement starts at prototype position
     setMeasureOrigin({ x: px, z: pz });
 
     // camera framing
@@ -768,7 +1221,7 @@ function ThreeRoom({ rowsFor3D, spatial }) {
     controls.update();
 
     setStatus(`Deployed ✅ ${rows.length} pads`);
-  }, [rowsFor3D, spatial, padReadyTick, protoReadyTick]);
+  }, [rowsFor3D, spatial, padReadyTick, protoReadyTick, focusClass, viewMode, isApplied]);
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>
@@ -802,6 +1255,7 @@ function ThreeRoom({ rowsFor3D, spatial }) {
             background: "rgba(0,0,0,0.55)",
             color: "white",
             fontSize: 12,
+            textAlign: "left",
             lineHeight: 1.35,
             pointerEvents: "none",
             maxWidth: 260,
