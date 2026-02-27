@@ -10,7 +10,7 @@ import Contact from "./pages/Contact/Contact";
 
 export default function App() {
   return (
-    <Router>
+    <Router basename="/Vibra-Web">
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
