@@ -10,8 +10,9 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
  *  - public/models/pad_2.stl
  *  - public/models/Protoype-stripped.stl   (yes, your filename has Protoype)
  */
-const PAD_URL = "/models/pad_2.stl";
-const PROTOTYPE_URL = "/models/Protoype-stripped.stl";
+const BASE = import.meta.env.BASE_URL; // "/Vibra-Web/"
+const PAD_URL = `${BASE}models/pad_2.stl`;
+const PROTOTYPE_URL = `${BASE}models/Protoype-stripped.stl`;
 
 /* =========================
    HELPERS
