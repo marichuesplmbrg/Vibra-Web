@@ -3,8 +3,9 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/Vibra-Web/",   // IMPORTANT: repo name
+  base: "/Vibra-Web/",
   build: {
-    outDir: "docs"       // 👈 change from dist to docs
-  }
+    outDir: "docs",
+    emptyOutDir: true,
+  },
 });
