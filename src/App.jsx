@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout/Layout.jsx";
 
 import Home from "./pages/Home/Home";
@@ -10,7 +10,7 @@ import Contact from "./pages/Contact/Contact";
 
 export default function App() {
   return (
-    <Router basename="/Vibra-Web">
+    <Router>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
