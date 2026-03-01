@@ -201,7 +201,7 @@ export default function Slide1({
 
         const cleaned = rows.map((r) => ({
           Angle: getVal(r, ["angle"]),
-          Decibel: getVal(r, ["db", "dB"]),
+          Decibel: getVal(r, ["db", "dB", "decibel"]),
           Ultrasonic: getVal(r, ["utv", "ultrasonic"]),
           RT60: getVal(r, ["rt60", "reverberation"]),
           HeightRaw: getVal(r, ["utvh", "height", "heightraw"]),

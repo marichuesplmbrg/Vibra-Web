@@ -7,8 +7,6 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
 /* =========================
    DEPLOY-SAFE ASSET URLS
-   - Works in localhost + GitHub Pages subfolder (BASE_URL)
-   - Prototype tries BOTH spellings
 ========================= */
 const BASE = import.meta.env.BASE_URL || "/";
 const joinBase = (p) => `${BASE}${String(p).replace(/^\/+/, "")}`;
@@ -16,7 +14,7 @@ const joinBase = (p) => `${BASE}${String(p).replace(/^\/+/, "")}`;
 const PAD_URL = joinBase("models/pad_2.stl");
 const PROTOTYPE_URLS = [
   joinBase("models/Prototype-stripped.stl"),
-  joinBase("models/Protoype-stripped.stl"), // keep your old typo as fallback
+  joinBase("models/Protoype-stripped.stl"), // fallback (typo)
 ];
 
 /* =========================
@@ -60,9 +58,9 @@ function parseLayerIndex(layerVal) {
   return Math.min(3, Math.max(0, n - 1)); // 0..3
 }
 
-/* ------------------------
+/* =========================
    STL async loaders
------------------------- */
+========================= */
 function loadSTL(url) {
   return new Promise((resolve, reject) => {
     new STLLoader().load(url, resolve, undefined, reject);
@@ -123,6 +121,7 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
   bb.getCenter(center);
   const minY = bb.min.y;
 
+  // center XZ + ground on Y=0
   g.translate(-center.x, -minY, -center.z);
 
   g.computeBoundingBox();
@@ -397,14 +396,27 @@ const TREATMENT = {
       desc:
         "Bass traps help reduce low-frequency build-up and smooth the room response. They are usually placed in corners and wall–ceiling corners where bass energy collects.",
       options: [
-        { name: "Rockwool / Mineral Wool Corner Bass Trap", text: "Common DIY/pro option." },
-        { name: "Foam Corner Bass Trap", text: "Easy to buy. Works mainly on mid/high-bass." },
-        { name: "Panel Bass Trap", text: "Thicker wall panels placed at corners/first reflections." },
-        { name: "Tube / Cylindrical Bass Trap", text: "Portable and repositionable." },
+        {
+          name: "Rockwool / Mineral Wool Corner Bass Trap",
+          text: "Common DIY/pro option.",
+        },
+        {
+          name: "Foam Corner Bass Trap",
+          text: "Easy to buy. Works mainly on mid/high-bass.",
+        },
+        {
+          name: "Panel Bass Trap",
+          text: "Thicker wall panels placed at corners/first reflections.",
+        },
+        {
+          name: "Tube / Cylindrical Bass Trap",
+          text: "Portable and repositionable.",
+        },
       ],
       footnote: "Tip: Corner placement usually gives the biggest improvement for hotspots.",
     },
   },
+
   deadspot: {
     title: "Deadspot Treatment",
     fixed: {
@@ -430,6 +442,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
 
   const [focusClass, setFocusClass] = useState("all"); // all | hotspot | deadspot
   const [showGuide, setShowGuide] = useState(false);
+
   const [applied, setApplied] = useState({ hotspot: false, deadspot: false });
   const [viewMode, setViewMode] = useState("before"); // before | after
 
@@ -450,6 +463,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
   const filteredRows = useMemo(() => {
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
     if (focusClass === "all") return rows;
+
     const want = focusClass === "hotspot" ? "hot" : "dead";
     return rows.filter((r) => normClass(getField(r, "Classification")).includes(want));
   }, [rowsFor3D, focusClass]);
@@ -477,6 +491,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
   return (
     <div className="sim-slide sim-slide-2">
       <div className="sim-row sim-row-2">
+        {/* LEFT */}
         <div className="glass-card glass-card--bigLeft">
           <div className="sim3d-card sim3d-card--three">
             <ThreeRoom
@@ -527,6 +542,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
           </div>
         </div>
 
+        {/* RIGHT */}
         <div className="glass-card glass-card--recommend">
           <h2 className="card-title card-title--recommend">RECOMMENDATION</h2>
 
@@ -582,6 +598,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   <div className="select-title">
                     What you want to select: <b>Hotspot</b> or <b>Deadspot</b>?
                   </div>
+
                   <div className="select-actions">
                     <button type="button" className="select-btn" onClick={() => setFocusClass("hotspot")}>
                       Select Hotspot
@@ -593,6 +610,8 @@ export default function Slide2({ rowsFor3D, spatial }) {
                       Show All
                     </button>
                   </div>
+
+                  <div className="select-hint">You can also click the Legend inside the 3D panel.</div>
                 </div>
 
                 {focusClass === "all" ? (
@@ -643,6 +662,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
 
                       <div className="recommend-card" style={{ marginTop: 14 }}>
                         <div className="recommend-card-title">Available Types (PH-friendly)</div>
+
                         <div className="recommend-list" style={{ marginTop: 10 }}>
                           {activeTreat.fixed.options.map((o) => (
                             <div className="recommend-item" key={o.name}>
@@ -651,6 +671,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
                             </div>
                           ))}
                         </div>
+
                         <div className="treat-footnote">{activeTreat.fixed.footnote}</div>
                       </div>
                     </div>
@@ -936,14 +957,15 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     });
   }, [spatial, measureOrigin]);
 
-  /* ---------- LOAD PAD (DEPLOY SAFE) ---------- */
+  /* ---------- LOAD PAD ---------- */
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       if (padRef.current.ready) return;
 
-      setStatus("Loading pad_2.stl…");
       try {
+        setStatus("Loading pad_2.stl…");
         const { geom } = await loadSTLWithFallback([PAD_URL], (u) =>
           setStatus(`Loading pad… ${u.split("/").slice(-1)[0]}`)
         );
@@ -977,7 +999,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     };
   }, []);
 
-  /* ---------- LOAD PROTOTYPE (TRY BOTH SPELLINGS) ---------- */
+  /* ---------- LOAD PROTOTYPE ---------- */
   useEffect(() => {
     let cancelled = false;
 
@@ -1017,7 +1039,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       } catch (err) {
         console.error("[Prototype] load failed ❌", err);
         setStatus(
-          `FAILED to load prototype STL. Put it in /public/models and check filename case (Prototype vs Protoype).`
+          "FAILED to load prototype STL. Put it in /public/models and check filename case (Prototype vs Protoype)."
         );
       }
     })();
@@ -1027,7 +1049,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     };
   }, []);
 
-  /* ---------- BUILD PADS ---------- */
+  /* ---------- BUILD PADS (SENSOR MAPPING + FACE PROTOTYPE) ---------- */
   useEffect(() => {
     const { padsGroup, camera, controls } = threeRef.current;
     if (!padsGroup || !camera || !controls) return;
@@ -1057,8 +1079,9 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     const halfW = widthM / 2 - margin;
 
     const maxDistCm =
-      Math.max(...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)) ||
-      0;
+      Math.max(
+        ...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)
+      ) || 0;
 
     const SPREAD = maxDistCm >= 20 ? 1 : 30;
 
@@ -1080,6 +1103,8 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
 
     const selectedType = focusClass === "hotspot" ? "hot" : focusClass === "deadspot" ? "dead" : null;
 
+    const createdPads = [];
+
     rows.forEach((row, index) => {
       const angleDeg = toNumber(getField(row, "Angle"));
       const distCm = toNumber(getField(row, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV"));
@@ -1087,10 +1112,13 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       let x, z;
 
       if (angleDeg != null && distCm != null && distCm > 0) {
+        // ✅ SENSOR RULE:
+        // 0 = North (-Z), 90 = East (+X), 180 = South (+Z), 270 = West (-X)
         const theta = (angleDeg * Math.PI) / 180;
         const distM = (distCm / 100) * SPREAD;
-        x = THREE.MathUtils.clamp(Math.cos(theta) * distM, -halfL, halfL);
-        z = THREE.MathUtils.clamp(Math.sin(theta) * distM, -halfW, halfW);
+
+        x = THREE.MathUtils.clamp(Math.sin(theta) * distM, -halfL, halfL);
+        z = THREE.MathUtils.clamp(-Math.cos(theta) * distM, -halfW, halfW);
       } else {
         const r = Math.floor(index / cols);
         const c = index % cols;
@@ -1112,24 +1140,28 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       const cls = normClass(getField(row, "Classification") ?? "neutral");
 
       let baseMat =
-        cls.includes("hot") ? matsRef.current.hot : cls.includes("dead") ? matsRef.current.dead : matsRef.current.neutral;
+        cls.includes("hot")
+          ? matsRef.current.hot
+          : cls.includes("dead")
+          ? matsRef.current.dead
+          : matsRef.current.neutral;
 
       if (viewMode === "after" && isApplied && selectedType && cls.includes(selectedType)) {
         baseMat = matsRef.current.treated;
       }
 
       const padMesh = new THREE.Mesh(padRef.current.geom.clone(), baseMat);
-
-      // ✅ IMPORTANT: keep your original scaling style, but add fixYaw for facing
       const finalScale = padRef.current.baseScale * PAD_WORLD_SIZE;
       padMesh.scale.setScalar(finalScale);
-      padMesh.rotation.y = padRef.current.fixYaw || 0;
 
       padMesh.position.set(x, y, z);
       padMesh.userData = { row, index };
+
       padsGroup.add(padMesh);
+      createdPads.push(padMesh);
     });
 
+    // ✅ prototype at centroid
     const c = count ? centroid.multiplyScalar(1 / count) : new THREE.Vector3(0, 0, 0);
     const px = THREE.MathUtils.clamp(c.x, -halfL + 0.2, halfL - 0.2);
     const pz = THREE.MathUtils.clamp(c.z, -halfW + 0.2, halfW - 0.2);
@@ -1139,6 +1171,21 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
 
     setMeasureOrigin({ x: px, z: pz });
 
+    // ✅ make each pad face the prototype
+    for (const pad of createdPads) {
+      const dx = px - pad.position.x;
+      const dz = pz - pad.position.z;
+
+      // yaw 0 faces +Z (three.js convention)
+      let yaw = Math.atan2(dx, dz);
+
+      // add STL forward-axis correction
+      yaw += padRef.current.fixYaw || 0;
+
+      pad.rotation.set(0, yaw, 0);
+    }
+
+    // camera framing
     const roomWidth = east - west + 0.6;
     const roomDepth = north - south + 0.6;
     const cx = (east + west) / 2;
