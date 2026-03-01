@@ -5,9 +5,20 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
-const BASE = import.meta.env.BASE_URL; // "/Vibra-Web/"
-const PAD_URL = `${BASE}models/pad_2.stl`;
-const PROTOTYPE_URL = `${BASE}models/Protoype-stripped.stl`;
+const BASE = import.meta.env.BASE_URL || "/";
+
+// ✅ Use a safe join so it works in local + GitHub pages (base subfolder)
+const joinBase = (p) => `${BASE}${String(p).replace(/^\/+/, "")}`;
+
+// ✅ Primary URLs (what you intended)
+const PAD_URL = joinBase("models/pad_2.stl");
+
+// ⚠️ Your code had "Protoype-stripped.stl" (typo). We’ll try BOTH spellings.
+// Put whichever is correct in /public/models/
+const PROTOTYPE_URLS = [
+  joinBase("models/Prototype-stripped.stl"),
+  joinBase("models/Protoype-stripped.stl"),
+];
 
 /* =========================
    HELPERS
@@ -51,10 +62,34 @@ function parseLayerIndex(layerVal) {
 }
 
 /* ------------------------
+   STL loading helpers
+------------------------ */
+function loadSTL(url) {
+  return new Promise((resolve, reject) => {
+    const loader = new STLLoader();
+    loader.load(url, resolve, undefined, reject);
+  });
+}
+
+async function loadSTLWithFallback(urls, onTried) {
+  let lastErr = null;
+  for (const u of urls) {
+    try {
+      onTried?.(u);
+      const g = await loadSTL(u);
+      return { geom: g, url: u };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("All STL URLs failed");
+}
+
+/* ------------------------
    STL orientation helpers
 ------------------------ */
 
-// Choose rotation that gives the biggest Y size (stands “upright”)
+// Choose rotation that makes the object "stand" (largest Y size)
 function orientGeometryUpright(geom) {
   const candidates = [
     new THREE.Euler(0, 0, 0),
@@ -110,8 +145,6 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
 /* =========================
    MEASUREMENT GRID (CM)
 ========================= */
-
-// ✅ plain text (no box), printed flat on the floor
 function makeFloorTextMesh(text, { fontSize = 56 } = {}) {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
@@ -617,19 +650,15 @@ export default function Slide2({ rowsFor3D, spatial }) {
               </div>
             )}
 
-            {/* If NO deployed data yet */}
             {!hasData ? (
               <div className="info-card">
                 <div className="info-title">No data detected</div>
                 <div className="info-text">
                   Please import and deploy your data in <b>Slide 1</b> first.
-                  <br />
-                  After deploying, this panel will show hotspot/deadspot explanations and treatment options.
                 </div>
               </div>
             ) : (
               <>
-                {/* What are hotspot/deadspot */}
                 <div className="info-card" style={{ marginBottom: 16 }}>
                   <div className="info-title">What are Hotspot and Deadspot?</div>
                   <div className="info-text">
@@ -641,7 +670,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   </div>
                 </div>
 
-                {/* Selection */}
                 <div className="select-card">
                   <div className="select-title">
                     What you want to select: <b>Hotspot</b> or <b>Deadspot</b>?
@@ -662,7 +690,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   <div className="select-hint">You can also click the Legend inside the 3D panel.</div>
                 </div>
 
-                {/* Treatment */}
                 {focusClass === "all" ? (
                   <div className="info-card">
                     <div className="info-title">Select one to continue</div>
@@ -735,7 +762,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
             )}
           </div>
 
-          {/* Keep your rails if you want (optional). Remove if not used in CSS. */}
           <div className="scroll-rail" />
           <div className="scroll-thumb" />
         </div>
@@ -752,12 +778,6 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
   const [tip, setTip] = useState({ show: false, x: 0, y: 0, text: "" });
   const [status, setStatus] = useState("Initializing 3D…");
 
-  const [padReadyTick, setPadReadyTick] = useState(0);
-  const [protoReadyTick, setProtoReadyTick] = useState(0);
-
-  // ✅ measurement origin (0 cm) anchored to prototype position
-  const [measureOrigin, setMeasureOrigin] = useState({ x: 0, z: 0 });
-
   const threeRef = useRef({
     renderer: null,
     scene: null,
@@ -773,17 +793,28 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
   const hoverRAF = useRef(0);
   const lastText = useRef("");
 
+  // ✅ pad model state
   const padRef = useRef({
     ready: false,
     geom: null,
     baseScale: 1,
+    fixYaw: 0,
   });
 
+  // ✅ prototype model state
   const protoRef = useRef({
     mesh: null,
     loaded: false,
-    fallbackBox: null,
   });
+
+  // ✅ store mapping for InstancedMesh hover
+  const instMapRef = useRef({
+    rows: [],
+    mesh: null,
+  });
+
+  // ✅ measurement origin (0 cm) anchored to prototype position
+  const [measureOrigin, setMeasureOrigin] = useState({ x: 0, z: 0 });
 
   const matsRef = useRef({
     hot: new THREE.MeshStandardMaterial({
@@ -809,7 +840,6 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       transparent: false,
       opacity: 1,
     }),
-    // ✅ After/treatment preview color
     treated: new THREE.MeshStandardMaterial({
       color: 0x2ecc71,
       emissive: 0x2ecc71,
@@ -895,18 +925,26 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
         pointerRef.current.set((mx / rect.width) * 2 - 1, -((my / rect.height) * 2 - 1));
         raycasterRef.current.setFromCamera(pointerRef.current, camera);
 
-        const hits = raycasterRef.current.intersectObjects(padsGroup.children, false);
+        const inst = instMapRef.current.mesh;
+        if (!inst) {
+          if (tip.show) setTip((t) => ({ ...t, show: false }));
+          lastText.current = "";
+          return;
+        }
+
+        const hits = raycasterRef.current.intersectObject(inst, false);
         if (!hits.length) {
           if (tip.show) setTip((t) => ({ ...t, show: false }));
           lastText.current = "";
           return;
         }
 
-        const hit = hits[0].object;
-        const row = hit?.userData?.row;
+        const hit = hits[0];
+        const id = hit.instanceId;
+        const row = instMapRef.current.rows?.[id];
         if (!row) return;
 
-        const idx = (hit.userData.index ?? 0) + 1;
+        const idx = id + 1;
         const text = [
           `#${idx}`,
           `Layer: ${getField(row, "Layer") ?? "-"}`,
@@ -953,17 +991,15 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       renderer.dispose();
       if (renderer.domElement && mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
-    // ✅ MUST be empty so hover does not re-init three.js
   }, []);
 
-  /* ---------- ROOM (USES YOUR LENGTH/WIDTH FROM 0/180 and 90/270) ---------- */
+  /* ---------- ROOM ---------- */
   useEffect(() => {
     const { roomGroup } = threeRef.current;
     if (!roomGroup) return;
 
     roomGroup.clear();
 
-    // lengthCm = U(0)+U(180), widthCm = U(90)+U(270)
     const lengthM =
       spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
 
@@ -1019,52 +1055,72 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     });
   }, [spatial, measureOrigin]);
 
-  /* ---------- LOAD PAD ---------- */
+  /* ---------- LOAD PAD (ONLY ONCE) ---------- */
   useEffect(() => {
-    if (padRef.current.ready) return;
+    let cancelled = false;
 
-    setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
-    const loader = new STLLoader();
+    (async () => {
+      if (padRef.current.ready) return;
 
-    loader.load(
-      PAD_URL,
-      (geom) => {
+      setStatus("Loading pad_2.stl…");
+      try {
+        const { geom } = await loadSTLWithFallback([PAD_URL], () => {});
+        if (cancelled) return;
+
         const upright = orientGeometryUpright(geom);
         const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
+
+        // determine a consistent yaw fix so the pad faces correctly
+        prepared.computeBoundingBox();
+        const size = new THREE.Vector3();
+        prepared.boundingBox.getSize(size);
+
+        // pick smallest of X/Z as thickness axis (ignore Y)
+        const thicknessAxis = size.x <= size.z ? "x" : "z";
+        const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
+
         padRef.current.geom = prepared;
         padRef.current.baseScale = scale;
+        padRef.current.fixYaw = fixYaw;
         padRef.current.ready = true;
 
-        setPadReadyTick((t) => t + 1);
         setStatus("pad_2.stl loaded ✅");
-      },
-      undefined,
-      (err) => {
+      } catch (err) {
         console.error("[Pad] load failed ❌", err);
         setStatus(`FAILED to load pad_2.stl. Check DevTools > Network if ${PAD_URL} is 404.`);
       }
-    );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  /* ---------- LOAD PROTOTYPE ---------- */
+  /* ---------- LOAD PROTOTYPE (TRY BOTH FILENAMES) ---------- */
   useEffect(() => {
-    const { protoGroup } = threeRef.current;
-    if (!protoGroup) return;
-    if (protoRef.current.loaded) return;
+    let cancelled = false;
 
-    const fallback = new THREE.Mesh(
-      new THREE.BoxGeometry(0.25, 0.25, 0.25),
-      new THREE.MeshStandardMaterial({ color: 0xf58727 })
-    );
-    fallback.position.set(0, 0.125, 0);
-    protoGroup.add(fallback);
-    protoRef.current.fallbackBox = fallback;
+    (async () => {
+      const { protoGroup } = threeRef.current;
+      if (!protoGroup) return;
+      if (protoRef.current.loaded) return;
 
-    const loader = new STLLoader();
+      // fallback box while loading
+      protoGroup.clear();
+      const fallback = new THREE.Mesh(
+        new THREE.BoxGeometry(0.25, 0.25, 0.25),
+        new THREE.MeshStandardMaterial({ color: 0xf58727 })
+      );
+      fallback.position.set(0, 0.125, 0);
+      protoGroup.add(fallback);
 
-    loader.load(
-      PROTOTYPE_URL,
-      (geom) => {
+      try {
+        setStatus("Loading prototype STL…");
+        const { geom, url } = await loadSTLWithFallback(PROTOTYPE_URLS, (u) =>
+          setStatus(`Loading prototype… trying ${u.split("/").slice(-1)[0]}`)
+        );
+        if (cancelled) return;
+
         const upright = orientGeometryUpright(geom);
         const { geom: prepared, scale } = groundCenterAndScale(upright, 1.8);
 
@@ -1077,54 +1133,185 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
         protoRef.current.mesh = mesh;
         protoRef.current.loaded = true;
 
-        setProtoReadyTick((t) => t + 1);
-      },
-      undefined,
-      (err) => {
+        // ✅ anchor measurement 0cm to prototype position
+        setMeasureOrigin({ x: mesh.position.x, z: mesh.position.z });
+
+        setStatus(`prototype loaded ✅ (${url.split("/").slice(-1)[0]})`);
+      } catch (err) {
         console.error("[Prototype] load failed ❌", err);
-        setStatus(`FAILED to load Prototype. Check DevTools > Network if ${PROTOTYPE_URL} is 404.`);
+        setStatus(
+          `FAILED to load prototype STL. Check /public/models/Prototype-stripped.stl (or Protoype-stripped.stl) and DevTools > Network.`
+        );
       }
-    );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  /* ---------- LOAD PAD (KEEP ONLY THIS ONE) ---------- */
+  /* =========================
+     BUILD PADS (THIS WAS MISSING)
+     - Uses InstancedMesh so 600+ pads is fast
+========================= */
   useEffect(() => {
-    if (padRef.current.ready) return;
+    const { padsGroup } = threeRef.current;
+    if (!padsGroup) return;
 
-  setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
-  const loader = new STLLoader();
+    // clear old
+    padsGroup.clear();
+    instMapRef.current.mesh = null;
+    instMapRef.current.rows = [];
+    lastText.current = "";
+    setTip((t) => (t.show ? { ...t, show: false } : t));
 
-  loader.load(
-    PAD_URL,
-    (geom) => {
-      const upright = orientGeometryUpright(geom);
-      const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
-
-      prepared.computeBoundingBox();
-      const size = new THREE.Vector3();
-      prepared.boundingBox.getSize(size);
-
-      // thickness is usually the smallest of X/Z (ignore Y)
-      const thicknessAxis = size.x <= size.z ? "x" : "z";
-
-      // If thickness is X, rotate -90° so the thin axis becomes consistent with our facing logic
-      const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
-
-      padRef.current.geom = prepared;
-      padRef.current.baseScale = scale;
-      padRef.current.fixYaw = fixYaw;
-      padRef.current.ready = true;
-
-      setPadReadyTick((t) => t + 1);
-      setStatus("pad_2.stl loaded ✅");
-    },
-    undefined,
-    (err) => {
-      console.error("[Pad] load failed ❌", err);
-      setStatus(`FAILED to load pad_2.stl. Check DevTools > Network if ${PAD_URL} is 404.`);
+    const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
+    if (!rows.length) {
+      // still show status but don’t error
+      setStatus((s) => (s.includes("loaded") ? s : "No pads to display (no rows)."));
+      return;
     }
-  );
-}, []);
+    if (!padRef.current.ready || !padRef.current.geom) {
+      setStatus((s) => (s.includes("pad_2") ? s : "Waiting for pad_2.stl…"));
+      return;
+    }
+
+    // room size for placement bounds
+    const lengthM =
+      spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
+    const widthM =
+      spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
+
+    const halfL = lengthM / 2;
+    const halfW = widthM / 2;
+
+    // try to read coordinates from the row (if you have them)
+    const getX = (r) =>
+      toNumber(getField(r, "X", "PosX", "PositionX", "X(m)", "X_m", "Xcoord", "ColumnX"));
+    const getZ = (r) =>
+      toNumber(getField(r, "Z", "PosZ", "PositionZ", "Z(m)", "Z_m", "Zcoord", "RowZ"));
+
+    // split by layer (bottom to top)
+    const byLayer = [[], [], [], []];
+    for (const r of rows) byLayer[parseLayerIndex(getField(r, "Layer"))].push(r);
+
+    // pad spacing: if you have coordinates, we use them.
+    // otherwise, we auto-pack each layer into a grid.
+    const padYGap = 0.07; // separation per layer so they don't overlap visually
+
+    const placed = [];
+
+    for (let li = 0; li < 4; li++) {
+      const layerRows = byLayer[li];
+      if (!layerRows.length) continue;
+
+      // do we have coordinates?
+      const coordCount = layerRows.reduce((acc, r) => acc + (getX(r) != null && getZ(r) != null ? 1 : 0), 0);
+      const hasCoords = coordCount / layerRows.length > 0.7;
+
+      if (hasCoords) {
+        for (const r of layerRows) {
+          // if coords are in CM, they’ll be huge; assume meters if abs <= 20, otherwise cm->m
+          let x = getX(r);
+          let z = getZ(r);
+          if (x == null || z == null) continue;
+
+          const looksLikeCm = Math.abs(x) > 20 || Math.abs(z) > 20;
+          if (looksLikeCm) {
+            x = x / 100;
+            z = z / 100;
+          }
+
+          // clamp into room
+          x = THREE.MathUtils.clamp(x, -halfL + 0.08, halfL - 0.08);
+          z = THREE.MathUtils.clamp(z, -halfW + 0.08, halfW - 0.08);
+
+          placed.push({ row: r, x, z, y: 0.001 + li * padYGap });
+        }
+      } else {
+        // auto grid inside the room
+        const n = layerRows.length;
+        const cols = Math.ceil(Math.sqrt(n));
+        const rowsN = Math.ceil(n / cols);
+
+        const margin = 0.16;
+        const usableL = Math.max(0.5, lengthM - margin * 2);
+        const usableW = Math.max(0.5, widthM - margin * 2);
+
+        const stepX = usableL / Math.max(1, cols);
+        const stepZ = usableW / Math.max(1, rowsN);
+
+        for (let i = 0; i < n; i++) {
+          const c = i % cols;
+          const rr = Math.floor(i / cols);
+
+          const x = -usableL / 2 + stepX / 2 + c * stepX;
+          const z = -usableW / 2 + stepZ / 2 + rr * stepZ;
+
+          placed.push({ row: layerRows[i], x, z, y: 0.001 + li * padYGap });
+        }
+      }
+    }
+
+    if (!placed.length) {
+      setStatus("No pads placed (missing coords + empty layers).");
+      return;
+    }
+
+    // build InstancedMesh
+    const geom = padRef.current.geom;
+    const mat = matsRef.current.neutral.clone(); // we'll use instanceColor
+    mat.vertexColors = true;
+
+    const inst = new THREE.InstancedMesh(geom, mat, placed.length);
+    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    // IMPORTANT for raycaster + colors
+    inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(placed.length * 3), 3);
+
+    const tmpObj = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    for (let i = 0; i < placed.length; i++) {
+      const { row, x, z, y } = placed[i];
+
+      // choose base color
+      const cls = normClass(getField(row, "Classification") ?? "");
+      const base =
+        viewMode === "after" && isApplied && focusClass !== "all"
+          ? 0x2ecc71
+          : cls.includes("hot")
+          ? 0x7c0a02
+          : cls.includes("dead")
+          ? 0x0e4c92
+          : 0xf0f0f0;
+
+      color.setHex(base);
+      inst.setColorAt(i, color);
+
+      tmpObj.position.set(x, y, z);
+
+      // ✅ ensure pads stand on the ground, with consistent facing
+      tmpObj.rotation.set(0, padRef.current.fixYaw || 0, 0);
+
+      // scale from STL normalization
+      const s = padRef.current.baseScale || 1;
+      tmpObj.scale.setScalar(s);
+
+      tmpObj.updateMatrix();
+      inst.setMatrixAt(i, tmpObj.matrix);
+    }
+
+    inst.instanceMatrix.needsUpdate = true;
+    inst.instanceColor.needsUpdate = true;
+
+    padsGroup.add(inst);
+
+    instMapRef.current.mesh = inst;
+    instMapRef.current.rows = placed.map((p) => p.row);
+
+    setStatus((s) => (s.includes("loaded") ? s : "Pads rendered ✅"));
+  }, [rowsFor3D, spatial, focusClass, viewMode, isApplied]);
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>
@@ -1140,7 +1327,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
           fontSize: 12,
           zIndex: 30,
           pointerEvents: "none",
-          maxWidth: 360,
+          maxWidth: 460,
         }}
       >
         {status}
