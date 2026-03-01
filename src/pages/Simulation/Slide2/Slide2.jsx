@@ -1091,44 +1091,44 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
   useEffect(() => {
     if (padRef.current.ready) return;
 
-    setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
-    const loader = new STLLoader();
+  setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
+  const loader = new STLLoader();
 
-    loader.load(
-      PAD_URL,
-      (geom) => {
-        const upright = orientGeometryUpright(geom);
-        const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
+  loader.load(
+    PAD_URL,
+    (geom) => {
+      const upright = orientGeometryUpright(geom);
+      const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
 
-        // ✅ detect which axis is "thickness" (thin side) so we can face the prototype correctly
-        prepared.computeBoundingBox();
-        const size = new THREE.Vector3();
-        prepared.boundingBox.getSize(size);
+      // ✅ detect which axis is "thickness" (thin side) so we can face the prototype correctly
+      prepared.computeBoundingBox();
+      const size = new THREE.Vector3();
+      prepared.boundingBox.getSize(size);
 
-        // usually pad is thin on X or Z (ignore Y height)
-        const thicknessAxis = size.x <= size.z ? "x" : "z";
+      // usually pad is thin on X or Z (ignore Y height)
+      const thicknessAxis = size.x <= size.z ? "x" : "z";
 
-        // ✅ yaw fix so that the pad's thin axis becomes the "front" (+Z)
-        // If thickness is X, rotate -90° so +X becomes +Z.
-        const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
+      // ✅ yaw fix so that the pad's thin axis becomes the "front" (+Z)
+      // If thickness is X, rotate -90° so +X becomes +Z.
+      const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
 
-        padRef.current.geom = prepared;
-        padRef.current.baseScale = scale;
-        padRef.current.ready = true;
+      padRef.current.geom = prepared;
+      padRef.current.baseScale = scale;
+      padRef.current.ready = true;
 
-        // store correction so every pad uses same "front"
-        padRef.current.fixYaw = fixYaw;
+      // store correction so every pad uses same "front"
+      padRef.current.fixYaw = fixYaw;
 
-        setPadReadyTick((t) => t + 1);
-        setStatus("pad_2.stl loaded ✅");
-      },
-      undefined,
-      (err) => {
-        console.error("[Pad] load failed ❌", err);
-        setStatus(`FAILED to load pad_2.stl. Check DevTools > Network if ${PAD_URL} is 404.`);
-      }
-    );
-  }, []);
+      setPadReadyTick((t) => t + 1);
+      setStatus("pad_2.stl loaded ✅");
+    },
+    undefined,
+    (err) => {
+      console.error("[Pad] load failed ❌", err);
+      setStatus(`FAILED to load pad_2.stl. Check DevTools > Network if ${PAD_URL} is 404.`);
+    }
+  );
+}, []);
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>
