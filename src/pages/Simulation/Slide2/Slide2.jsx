@@ -5,11 +5,6 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
-/**
- * ✅ Put these files here:
- *  - public/models/pad_2.stl
- *  - public/models/Protoype-stripped.stl   (yes, your filename has Protoype)
- */
 const BASE = import.meta.env.BASE_URL; // "/Vibra-Web/"
 const PAD_URL = `${BASE}models/pad_2.stl`;
 const PROTOTYPE_URL = `${BASE}models/Protoype-stripped.stl`;
@@ -1092,137 +1087,48 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     );
   }, []);
 
-  /* ---------- BUILD PADS ---------- */
+  /* ---------- LOAD PAD ---------- */
   useEffect(() => {
-    const { padsGroup, camera, controls } = threeRef.current;
-    if (!padsGroup || !camera || !controls) return;
+    if (padRef.current.ready) return;
 
-    padsGroup.clear();
+    setStatus((s) => (s.includes("pad_2") ? s : "Loading pad_2.stl…"));
+    const loader = new STLLoader();
 
-    const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
-    if (!rows.length) {
-      setStatus("No data rows to deploy.");
-      return;
-    }
+    loader.load(
+      PAD_URL,
+      (geom) => {
+        const upright = orientGeometryUpright(geom);
+        const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
 
-    if (!padRef.current.ready || !padRef.current.geom) {
-      setStatus("Waiting for pad_2.stl to load…");
-      return;
-    }
+        // ✅ detect which axis is "thickness" (thin side) so we can face the prototype correctly
+        prepared.computeBoundingBox();
+        const size = new THREE.Vector3();
+        prepared.boundingBox.getSize(size);
 
-    setStatus(`Deploying ${rows.length} pads…`);
+        // usually pad is thin on X or Z (ignore Y height)
+        const thicknessAxis = size.x <= size.z ? "x" : "z";
 
-    const lengthM =
-      spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
-    const widthM =
-      spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
+        // ✅ yaw fix so that the pad's thin axis becomes the "front" (+Z)
+        // If thickness is X, rotate -90° so +X becomes +Z.
+        const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
 
-    const margin = 0.18;
-    const halfL = lengthM / 2 - margin;
-    const halfW = widthM / 2 - margin;
+        padRef.current.geom = prepared;
+        padRef.current.baseScale = scale;
+        padRef.current.ready = true;
 
-    const maxDistCm =
-      Math.max(...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)) ||
-      0;
+        // store correction so every pad uses same "front"
+        padRef.current.fixYaw = fixYaw;
 
-    const SPREAD = maxDistCm >= 20 ? 1 : 30;
-
-    const cols = Math.max(6, Math.ceil(Math.sqrt(rows.length)));
-    const cellX = (halfL * 2) / (cols + 1);
-    const cellZ = (halfW * 2) / (cols + 1);
-
-    let north = -Infinity,
-      south = Infinity,
-      east = -Infinity,
-      west = Infinity;
-
-    const centroid = new THREE.Vector3(0, 0, 0);
-    let count = 0;
-
-    const PAD_WORLD_SIZE = 0.22;
-    const LAYER_STEP = 0.45;
-    const BASE_Y = 0.02;
-
-    const selectedType =
-      focusClass === "hotspot" ? "hot" : focusClass === "deadspot" ? "dead" : null;
-
-    rows.forEach((row, index) => {
-      const angleDeg = toNumber(getField(row, "Angle"));
-      const distCm = toNumber(getField(row, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV"));
-
-      let x, z;
-
-      if (angleDeg != null && distCm != null && distCm > 0) {
-        const theta = (angleDeg * Math.PI) / 180;
-        const distM = (distCm / 100) * SPREAD;
-        x = THREE.MathUtils.clamp(Math.cos(theta) * distM, -halfL, halfL);
-        z = THREE.MathUtils.clamp(Math.sin(theta) * distM, -halfW, halfW);
-      } else {
-        const r = Math.floor(index / cols);
-        const c = index % cols;
-        x = -halfL + cellX * (c + 1);
-        z = -halfW + cellZ * (r + 1);
+        setPadReadyTick((t) => t + 1);
+        setStatus("pad_2.stl loaded ✅");
+      },
+      undefined,
+      (err) => {
+        console.error("[Pad] load failed ❌", err);
+        setStatus(`FAILED to load pad_2.stl. Check DevTools > Network if ${PAD_URL} is 404.`);
       }
-
-      const layerIndex = parseLayerIndex(getField(row, "Layer") ?? "Layer 1");
-      const y = BASE_Y + layerIndex * LAYER_STEP;
-
-      north = Math.max(north, z);
-      south = Math.min(south, z);
-      east = Math.max(east, x);
-      west = Math.min(west, x);
-
-      centroid.add(new THREE.Vector3(x, 0, z));
-      count++;
-
-      const cls = normClass(getField(row, "Classification") ?? "neutral");
-
-      // BEFORE base materials
-      let baseMat =
-        cls.includes("hot")
-          ? matsRef.current.hot
-          : cls.includes("dead")
-          ? matsRef.current.dead
-          : matsRef.current.neutral;
-
-      // AFTER: if applied + after view + selectedType matches this pad
-      if (viewMode === "after" && isApplied && selectedType && cls.includes(selectedType)) {
-        baseMat = matsRef.current.treated;
-      }
-
-      const padMesh = new THREE.Mesh(padRef.current.geom.clone(), baseMat);
-      const finalScale = padRef.current.baseScale * PAD_WORLD_SIZE;
-      padMesh.scale.setScalar(finalScale);
-
-      padMesh.position.set(x, y, z);
-      padMesh.userData = { row, index };
-      padsGroup.add(padMesh);
-    });
-
-    // prototype at centroid
-    const c = count ? centroid.multiplyScalar(1 / count) : new THREE.Vector3(0, 0, 0);
-    const px = THREE.MathUtils.clamp(c.x, -halfL + 0.2, halfL - 0.2);
-    const pz = THREE.MathUtils.clamp(c.z, -halfW + 0.2, halfW - 0.2);
-
-    if (protoRef.current.mesh) protoRef.current.mesh.position.set(px, 0, pz);
-    else if (protoRef.current.fallbackBox) protoRef.current.fallbackBox.position.set(px, 0.125, pz);
-
-    // measurement starts at prototype position
-    setMeasureOrigin({ x: px, z: pz });
-
-    // camera framing
-    const roomWidth = east - west + 0.6;
-    const roomDepth = north - south + 0.6;
-    const cx = (east + west) / 2;
-    const cz = (north + south) / 2;
-
-    const maxDim = Math.max(roomWidth, roomDepth, 3);
-    camera.position.set(cx, maxDim * 0.9, cz + maxDim * 1.3);
-    controls.target.set(cx, 1.1, cz);
-    controls.update();
-
-    setStatus(`Deployed ✅ ${rows.length} pads`);
-  }, [rowsFor3D, spatial, padReadyTick, protoReadyTick, focusClass, viewMode, isApplied]);
+    );
+  }, []);
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>
