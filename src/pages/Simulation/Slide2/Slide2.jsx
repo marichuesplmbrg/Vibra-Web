@@ -1087,7 +1087,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     );
   }, []);
 
-  /* ---------- LOAD PAD ---------- */
+  /* ---------- LOAD PAD (KEEP ONLY THIS ONE) ---------- */
   useEffect(() => {
     if (padRef.current.ready) return;
 
@@ -1100,24 +1100,20 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       const upright = orientGeometryUpright(geom);
       const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
 
-      // ✅ detect which axis is "thickness" (thin side) so we can face the prototype correctly
       prepared.computeBoundingBox();
       const size = new THREE.Vector3();
       prepared.boundingBox.getSize(size);
 
-      // usually pad is thin on X or Z (ignore Y height)
+      // thickness is usually the smallest of X/Z (ignore Y)
       const thicknessAxis = size.x <= size.z ? "x" : "z";
 
-      // ✅ yaw fix so that the pad's thin axis becomes the "front" (+Z)
-      // If thickness is X, rotate -90° so +X becomes +Z.
+      // If thickness is X, rotate -90° so the thin axis becomes consistent with our facing logic
       const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
 
       padRef.current.geom = prepared;
       padRef.current.baseScale = scale;
-      padRef.current.ready = true;
-
-      // store correction so every pad uses same "front"
       padRef.current.fixYaw = fixYaw;
+      padRef.current.ready = true;
 
       setPadReadyTick((t) => t + 1);
       setStatus("pad_2.stl loaded ✅");
