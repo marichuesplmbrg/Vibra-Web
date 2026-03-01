@@ -5,19 +5,18 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
+/* =========================
+   DEPLOY-SAFE ASSET URLS
+   - Works in localhost + GitHub Pages subfolder (BASE_URL)
+   - Prototype tries BOTH spellings
+========================= */
 const BASE = import.meta.env.BASE_URL || "/";
-
-// ✅ Use a safe join so it works in local + GitHub pages (base subfolder)
 const joinBase = (p) => `${BASE}${String(p).replace(/^\/+/, "")}`;
 
-// ✅ Primary URLs (what you intended)
 const PAD_URL = joinBase("models/pad_2.stl");
-
-// ⚠️ Your code had "Protoype-stripped.stl" (typo). We’ll try BOTH spellings.
-// Put whichever is correct in /public/models/
 const PROTOTYPE_URLS = [
   joinBase("models/Prototype-stripped.stl"),
-  joinBase("models/Protoype-stripped.stl"),
+  joinBase("models/Protoype-stripped.stl"), // keep your old typo as fallback
 ];
 
 /* =========================
@@ -62,22 +61,21 @@ function parseLayerIndex(layerVal) {
 }
 
 /* ------------------------
-   STL loading helpers
+   STL async loaders
 ------------------------ */
 function loadSTL(url) {
   return new Promise((resolve, reject) => {
-    const loader = new STLLoader();
-    loader.load(url, resolve, undefined, reject);
+    new STLLoader().load(url, resolve, undefined, reject);
   });
 }
 
-async function loadSTLWithFallback(urls, onTried) {
+async function loadSTLWithFallback(urls, onTry) {
   let lastErr = null;
   for (const u of urls) {
     try {
-      onTried?.(u);
-      const g = await loadSTL(u);
-      return { geom: g, url: u };
+      onTry?.(u);
+      const geom = await loadSTL(u);
+      return { geom, url: u };
     } catch (e) {
       lastErr = e;
     }
@@ -88,8 +86,6 @@ async function loadSTLWithFallback(urls, onTried) {
 /* ------------------------
    STL orientation helpers
 ------------------------ */
-
-// Choose rotation that makes the object "stand" (largest Y size)
 function orientGeometryUpright(geom) {
   const candidates = [
     new THREE.Euler(0, 0, 0),
@@ -118,7 +114,6 @@ function orientGeometryUpright(geom) {
   return best || geom;
 }
 
-// Center XZ, put bottom on Y=0, and return a scale to hit targetSize meters
 function groundCenterAndScale(geom, targetSize = 1.0) {
   const g = geom.clone();
   g.computeBoundingBox();
@@ -128,7 +123,6 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
   bb.getCenter(center);
   const minY = bb.min.y;
 
-  // Center XZ and place on floor Y=0
   g.translate(-center.x, -minY, -center.z);
 
   g.computeBoundingBox();
@@ -153,7 +147,6 @@ function makeFloorTextMesh(text, { fontSize = 56 } = {}) {
   canvas.height = 128;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   ctx.font = `bold ${fontSize}px Arial`;
   ctx.fillStyle = "rgba(0, 229, 255, 0.95)";
   ctx.textAlign = "center";
@@ -239,7 +232,6 @@ function addMeasurementGridCm({
   const labelLineZ = THREE.MathUtils.clamp(originZ, -halfW, halfW);
   const labelLineX = THREE.MathUtils.clamp(originX, -halfL, halfL);
 
-  // X labels
   for (let x = -halfL; x <= halfL + 1e-6; x += majorM) {
     const cmFromOrigin = Math.round((x - originX) * 100);
     const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
@@ -247,7 +239,6 @@ function addMeasurementGridCm({
     group.add(t);
   }
 
-  // Z labels
   for (let z = -halfW; z <= halfW + 1e-6; z += majorM) {
     const cmFromOrigin = Math.round((z - originZ) * 100);
     const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
@@ -341,7 +332,7 @@ function addWallRulersCm({
 
   const zWall = -halfW + wallThickness / 2 + surfaceOffset;
 
-  // A) HEIGHT ruler (vertical)
+  // HEIGHT ruler
   {
     const xRuler = -halfL + 0.12;
     for (let y = 0; y <= heightM + 1e-6; y += minorM) {
@@ -365,7 +356,7 @@ function addWallRulersCm({
     }
   }
 
-  // B) LENGTH ruler (horizontal)
+  // LENGTH ruler
   {
     const yRuler = 0.22;
     for (let x = -halfL; x <= halfL + 1e-6; x += minorM) {
@@ -401,74 +392,32 @@ function addWallRulersCm({
 const TREATMENT = {
   hotspot: {
     title: "Hotspot Treatment",
-    what: [
-      "A hotspot is a part of the room where sound becomes too strong or “focuses” in one area.",
-      "It can happen when reflections and low-frequency build-up collect at certain points (commonly corners or near walls).",
-      "Your data detects hotspot based on the measured parameters and classification output from the system.",
-    ],
     fixed: {
-      key: "bass_trap",
       label: "Bass Trap (Recommended)",
       desc:
         "Bass traps help reduce low-frequency build-up and smooth the room response. They are usually placed in corners and wall–ceiling corners where bass energy collects.",
       options: [
-        {
-          name: "Rockwool / Mineral Wool Corner Bass Trap",
-          text:
-            "Common DIY/pro option. Materials are widely available in PH hardware suppliers; many builders also sell ready-made corner traps online.",
-        },
-        {
-          name: "Foam Corner Bass Trap (Acoustic Foam)",
-          text:
-            "Easy to buy (PH e-commerce). Works mainly on mid/high-bass compared to thick wool traps, but still helps for basic control.",
-        },
-        {
-          name: "Panel Bass Trap (Thick Broadband Panels)",
-          text:
-            "Thicker wall panels placed at corners/first reflections. Often sold locally by acoustic treatment shops and custom builders.",
-        },
-        {
-          name: "Tube / Cylindrical Bass Trap",
-          text:
-            "Portable and repositionable. Some local sellers offer cylindrical traps; can also be custom-made by upholstery/wood shops.",
-        },
+        { name: "Rockwool / Mineral Wool Corner Bass Trap", text: "Common DIY/pro option." },
+        { name: "Foam Corner Bass Trap", text: "Easy to buy. Works mainly on mid/high-bass." },
+        { name: "Panel Bass Trap", text: "Thicker wall panels placed at corners/first reflections." },
+        { name: "Tube / Cylindrical Bass Trap", text: "Portable and repositionable." },
       ],
-      footnote: "Tip: Corner placement usually gives the biggest improvement for hotspots caused by low-frequency build-up.",
+      footnote: "Tip: Corner placement usually gives the biggest improvement for hotspots.",
     },
   },
-
   deadspot: {
     title: "Deadspot Treatment",
-    what: [
-      "A deadspot is a part of the room that feels weak, dull, or “missing detail.”",
-      "It can happen when reflections cancel out or when the space becomes overly absorptive in certain areas.",
-      "Your data detects deadspot based on the measured parameters and classification output from the system.",
-    ],
     fixed: {
-      key: "diffuser",
       label: "Diffuser (Recommended)",
       desc:
-        "Diffusers scatter reflections instead of removing them. This helps make the room feel more natural and balanced, improving spaciousness without adding strong echo.",
+        "Diffusers scatter reflections instead of removing them. This helps make the room feel more natural and balanced.",
       options: [
-        {
-          name: "QRD Diffuser (1D)",
-          text: "Common studio diffuser type. Available via local acoustic builders and custom wood shops in PH.",
-        },
-        {
-          name: "Skyline Diffuser (2D)",
-          text:
-            "Scatters sound in many directions. Often made-to-order locally; some ready-made options appear on PH marketplaces.",
-        },
-        {
-          name: "Poly / Curved Diffuser",
-          text: "Smooth scattering (good for small rooms). Usually custom-made using plywood/curved panels by local fabricators.",
-        },
-        {
-          name: "Slat / Hybrid Diffuser Panel",
-          text: "Hybrid look (wood slats + backing). Common in PH interior builds; can be ordered from acoustic/interior contractors.",
-        },
+        { name: "QRD Diffuser (1D)", text: "Common studio diffuser type." },
+        { name: "Skyline Diffuser (2D)", text: "Scatters sound in many directions." },
+        { name: "Poly / Curved Diffuser", text: "Smooth scattering (good for small rooms)." },
+        { name: "Slat / Hybrid Diffuser Panel", text: "Hybrid look (wood slats + backing)." },
       ],
-      footnote: "Tip: Rear wall diffusion often helps deadspots by restoring useful reflections without making the room harsh.",
+      footnote: "Tip: Rear wall diffusion often helps deadspots.",
     },
   },
 };
@@ -481,11 +430,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
 
   const [focusClass, setFocusClass] = useState("all"); // all | hotspot | deadspot
   const [showGuide, setShowGuide] = useState(false);
-
-  // per-type applied state
   const [applied, setApplied] = useState({ hotspot: false, deadspot: false });
-
-  // before/after view
   const [viewMode, setViewMode] = useState("before"); // before | after
 
   const counts = useMemo(() => {
@@ -505,29 +450,17 @@ export default function Slide2({ rowsFor3D, spatial }) {
   const filteredRows = useMemo(() => {
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
     if (focusClass === "all") return rows;
-
     const want = focusClass === "hotspot" ? "hot" : "dead";
     return rows.filter((r) => normClass(getField(r, "Classification")).includes(want));
   }, [rowsFor3D, focusClass]);
 
-  // clean UX: when changing focus, return to BEFORE view
-  useEffect(() => {
-    setViewMode("before");
-  }, [focusClass]);
+  useEffect(() => setViewMode("before"), [focusClass]);
 
   const activeTreat =
-    focusClass === "hotspot"
-      ? TREATMENT.hotspot
-      : focusClass === "deadspot"
-      ? TREATMENT.deadspot
-      : null;
+    focusClass === "hotspot" ? TREATMENT.hotspot : focusClass === "deadspot" ? TREATMENT.deadspot : null;
 
   const isApplied =
-    focusClass === "hotspot"
-      ? applied.hotspot
-      : focusClass === "deadspot"
-      ? applied.deadspot
-      : false;
+    focusClass === "hotspot" ? applied.hotspot : focusClass === "deadspot" ? applied.deadspot : false;
 
   const canTreat = hasData && focusClass !== "all";
 
@@ -544,7 +477,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
   return (
     <div className="sim-slide sim-slide-2">
       <div className="sim-row sim-row-2">
-        {/* LEFT: 3D */}
         <div className="glass-card glass-card--bigLeft">
           <div className="sim3d-card sim3d-card--three">
             <ThreeRoom
@@ -555,7 +487,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
               isApplied={isApplied}
             />
 
-            {/* LEGEND (clickable) */}
             <div className="three-legend">
               <div className="three-legend-title">Legend (Click to filter)</div>
 
@@ -564,7 +495,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                 className={`legend-btn ${focusClass === "hotspot" ? "on" : ""}`}
                 onClick={() => setFocusClass("hotspot")}
                 disabled={!hasData}
-                title={!hasData ? "Deploy data first in Slide 1" : "Show hotspots only"}
               >
                 <span className="swatch swatch-hot" /> Hotspot ({counts.hot})
               </button>
@@ -574,7 +504,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                 className={`legend-btn ${focusClass === "deadspot" ? "on" : ""}`}
                 onClick={() => setFocusClass("deadspot")}
                 disabled={!hasData}
-                title={!hasData ? "Deploy data first in Slide 1" : "Show deadspots only"}
               >
                 <span className="swatch swatch-dead" /> Deadspot ({counts.dead})
               </button>
@@ -584,7 +513,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                 className={`legend-btn ${focusClass === "all" ? "on" : ""}`}
                 onClick={() => setFocusClass("all")}
                 disabled={!hasData}
-                title={!hasData ? "Deploy data first in Slide 1" : "Show all pads"}
               >
                 <span className="swatch swatch-neutral" /> All ({counts.total})
               </button>
@@ -599,12 +527,10 @@ export default function Slide2({ rowsFor3D, spatial }) {
           </div>
         </div>
 
-        {/* RIGHT: RECOMMENDATION (APPLIED) */}
         <div className="glass-card glass-card--recommend">
           <h2 className="card-title card-title--recommend">RECOMMENDATION</h2>
 
           <div className="recommend-inner">
-            {/* Toolbar */}
             <div className="recommend-toolbar">
               <button
                 type="button"
@@ -625,7 +551,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
               </div>
             </div>
 
-            {/* Guide (collapsible) */}
             {showGuide && (
               <div className="guide-card">
                 <div className="guide-title">How to use Slide 2</div>
@@ -634,19 +559,13 @@ export default function Slide2({ rowsFor3D, spatial }) {
                     Go to Slide 1 → Import CSV → then click <b>Deploy</b>.
                   </li>
                   <li>
-                    In Slide 2, click <b>Hotspot</b> or <b>Deadspot</b> (Legend or buttons).
+                    In Slide 2, click <b>Hotspot</b> or <b>Deadspot</b>.
                   </li>
                   <li>Read the treatment recommendation.</li>
                   <li>
-                    Click <b>Apply Treatment</b> to preview the “After” view in 3D.
-                  </li>
-                  <li>
-                    Use <b>Before / After</b> to compare.
+                    Click <b>Apply Treatment</b> to preview “After” in 3D.
                   </li>
                 </ol>
-                <div className="guide-note">
-                  Note: Treatment preview is a visual indicator (green pads) to help users understand changes.
-                </div>
               </div>
             )}
 
@@ -659,22 +578,10 @@ export default function Slide2({ rowsFor3D, spatial }) {
               </div>
             ) : (
               <>
-                <div className="info-card" style={{ marginBottom: 16 }}>
-                  <div className="info-title">What are Hotspot and Deadspot?</div>
-                  <div className="info-text">
-                    <b>Hotspot</b> = sound energy becomes too strong in a specific area (often due to reflections + build-up).
-                    <br />
-                    <b>Deadspot</b> = sound feels weak/dull in a specific area (often due to cancellations or uneven reflections).
-                    <br />
-                    These are detected from your measured parameters and the system’s classification result.
-                  </div>
-                </div>
-
                 <div className="select-card">
                   <div className="select-title">
                     What you want to select: <b>Hotspot</b> or <b>Deadspot</b>?
                   </div>
-
                   <div className="select-actions">
                     <button type="button" className="select-btn" onClick={() => setFocusClass("hotspot")}>
                       Select Hotspot
@@ -686,8 +593,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                       Show All
                     </button>
                   </div>
-
-                  <div className="select-hint">You can also click the Legend inside the 3D panel.</div>
                 </div>
 
                 {focusClass === "all" ? (
@@ -701,9 +606,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   activeTreat && (
                     <div className="treat-card">
                       <div className="treat-title">{activeTreat.title}</div>
-                      <div className="treat-sub">
-                        Showing <b>{filteredRows.length}</b> pad(s) in 3D
-                      </div>
 
                       <div className="treat-main">
                         <div className="treat-badge">{activeTreat.fixed.label}</div>
@@ -716,7 +618,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                           className="apply-btn"
                           onClick={applyTreatment}
                           disabled={isApplied}
-                          title={isApplied ? "Treatment already applied" : "Apply and preview After"}
                         >
                           {isApplied ? "Applied ✓" : "Apply Treatment"}
                         </button>
@@ -734,7 +635,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                             className={`compare-btn ${viewMode === "after" ? "on" : ""}`}
                             onClick={() => setViewMode("after")}
                             disabled={!isApplied}
-                            title={!isApplied ? "Apply treatment to enable After view" : "View treated preview"}
                           >
                             After
                           </button>
@@ -743,7 +643,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
 
                       <div className="recommend-card" style={{ marginTop: 14 }}>
                         <div className="recommend-card-title">Available Types (PH-friendly)</div>
-
                         <div className="recommend-list" style={{ marginTop: 10 }}>
                           {activeTreat.fixed.options.map((o) => (
                             <div className="recommend-item" key={o.name}>
@@ -752,7 +651,6 @@ export default function Slide2({ rowsFor3D, spatial }) {
                             </div>
                           ))}
                         </div>
-
                         <div className="treat-footnote">{activeTreat.fixed.footnote}</div>
                       </div>
                     </div>
@@ -778,6 +676,11 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
   const [tip, setTip] = useState({ show: false, x: 0, y: 0, text: "" });
   const [status, setStatus] = useState("Initializing 3D…");
 
+  const [padReadyTick, setPadReadyTick] = useState(0);
+  const [protoReadyTick, setProtoReadyTick] = useState(0);
+
+  const [measureOrigin, setMeasureOrigin] = useState({ x: 0, z: 0 });
+
   const threeRef = useRef({
     renderer: null,
     scene: null,
@@ -793,7 +696,6 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
   const hoverRAF = useRef(0);
   const lastText = useRef("");
 
-  // ✅ pad model state
   const padRef = useRef({
     ready: false,
     geom: null,
@@ -801,20 +703,11 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     fixYaw: 0,
   });
 
-  // ✅ prototype model state
   const protoRef = useRef({
     mesh: null,
     loaded: false,
+    fallbackBox: null,
   });
-
-  // ✅ store mapping for InstancedMesh hover
-  const instMapRef = useRef({
-    rows: [],
-    mesh: null,
-  });
-
-  // ✅ measurement origin (0 cm) anchored to prototype position
-  const [measureOrigin, setMeasureOrigin] = useState({ x: 0, z: 0 });
 
   const matsRef = useRef({
     hot: new THREE.MeshStandardMaterial({
@@ -837,8 +730,6 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       emissiveIntensity: 0.12,
       roughness: 0.55,
       metalness: 0.02,
-      transparent: false,
-      opacity: 1,
     }),
     treated: new THREE.MeshStandardMaterial({
       color: 0x2ecc71,
@@ -925,26 +816,18 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
         pointerRef.current.set((mx / rect.width) * 2 - 1, -((my / rect.height) * 2 - 1));
         raycasterRef.current.setFromCamera(pointerRef.current, camera);
 
-        const inst = instMapRef.current.mesh;
-        if (!inst) {
-          if (tip.show) setTip((t) => ({ ...t, show: false }));
-          lastText.current = "";
-          return;
-        }
-
-        const hits = raycasterRef.current.intersectObject(inst, false);
+        const hits = raycasterRef.current.intersectObjects(padsGroup.children, false);
         if (!hits.length) {
           if (tip.show) setTip((t) => ({ ...t, show: false }));
           lastText.current = "";
           return;
         }
 
-        const hit = hits[0];
-        const id = hit.instanceId;
-        const row = instMapRef.current.rows?.[id];
+        const hit = hits[0].object;
+        const row = hit?.userData?.row;
         if (!row) return;
 
-        const idx = id + 1;
+        const idx = (hit.userData.index ?? 0) + 1;
         const text = [
           `#${idx}`,
           `Layer: ${getField(row, "Layer") ?? "-"}`,
@@ -1002,10 +885,8 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
 
     const lengthM =
       spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
-
     const widthM =
       spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
-
     const heightCm = toNumber(spatial?.heightRaw);
     const heightM = heightCm != null ? heightCm / 100 : 2.6;
 
@@ -1055,27 +936,26 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     });
   }, [spatial, measureOrigin]);
 
-  /* ---------- LOAD PAD (ONLY ONCE) ---------- */
+  /* ---------- LOAD PAD (DEPLOY SAFE) ---------- */
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
       if (padRef.current.ready) return;
 
       setStatus("Loading pad_2.stl…");
       try {
-        const { geom } = await loadSTLWithFallback([PAD_URL], () => {});
+        const { geom } = await loadSTLWithFallback([PAD_URL], (u) =>
+          setStatus(`Loading pad… ${u.split("/").slice(-1)[0]}`)
+        );
         if (cancelled) return;
 
         const upright = orientGeometryUpright(geom);
         const { geom: prepared, scale } = groundCenterAndScale(upright, 1.0);
 
-        // determine a consistent yaw fix so the pad faces correctly
         prepared.computeBoundingBox();
         const size = new THREE.Vector3();
         prepared.boundingBox.getSize(size);
 
-        // pick smallest of X/Z as thickness axis (ignore Y)
         const thicknessAxis = size.x <= size.z ? "x" : "z";
         const fixYaw = thicknessAxis === "x" ? -Math.PI / 2 : 0;
 
@@ -1084,6 +964,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
         padRef.current.fixYaw = fixYaw;
         padRef.current.ready = true;
 
+        setPadReadyTick((t) => t + 1);
         setStatus("pad_2.stl loaded ✅");
       } catch (err) {
         console.error("[Pad] load failed ❌", err);
@@ -1096,7 +977,7 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     };
   }, []);
 
-  /* ---------- LOAD PROTOTYPE (TRY BOTH FILENAMES) ---------- */
+  /* ---------- LOAD PROTOTYPE (TRY BOTH SPELLINGS) ---------- */
   useEffect(() => {
     let cancelled = false;
 
@@ -1105,17 +986,15 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
       if (!protoGroup) return;
       if (protoRef.current.loaded) return;
 
-      // fallback box while loading
-      protoGroup.clear();
       const fallback = new THREE.Mesh(
         new THREE.BoxGeometry(0.25, 0.25, 0.25),
         new THREE.MeshStandardMaterial({ color: 0xf58727 })
       );
       fallback.position.set(0, 0.125, 0);
       protoGroup.add(fallback);
+      protoRef.current.fallbackBox = fallback;
 
       try {
-        setStatus("Loading prototype STL…");
         const { geom, url } = await loadSTLWithFallback(PROTOTYPE_URLS, (u) =>
           setStatus(`Loading prototype… trying ${u.split("/").slice(-1)[0]}`)
         );
@@ -1133,14 +1012,12 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
         protoRef.current.mesh = mesh;
         protoRef.current.loaded = true;
 
-        // ✅ anchor measurement 0cm to prototype position
-        setMeasureOrigin({ x: mesh.position.x, z: mesh.position.z });
-
+        setProtoReadyTick((t) => t + 1);
         setStatus(`prototype loaded ✅ (${url.split("/").slice(-1)[0]})`);
       } catch (err) {
         console.error("[Prototype] load failed ❌", err);
         setStatus(
-          `FAILED to load prototype STL. Check /public/models/Prototype-stripped.stl (or Protoype-stripped.stl) and DevTools > Network.`
+          `FAILED to load prototype STL. Put it in /public/models and check filename case (Prototype vs Protoype).`
         );
       }
     })();
@@ -1150,168 +1027,130 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
     };
   }, []);
 
-  /* =========================
-     BUILD PADS (THIS WAS MISSING)
-     - Uses InstancedMesh so 600+ pads is fast
-========================= */
+  /* ---------- BUILD PADS ---------- */
   useEffect(() => {
-    const { padsGroup } = threeRef.current;
-    if (!padsGroup) return;
+    const { padsGroup, camera, controls } = threeRef.current;
+    if (!padsGroup || !camera || !controls) return;
 
-    // clear old
     padsGroup.clear();
-    instMapRef.current.mesh = null;
-    instMapRef.current.rows = [];
-    lastText.current = "";
-    setTip((t) => (t.show ? { ...t, show: false } : t));
 
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
     if (!rows.length) {
-      // still show status but don’t error
-      setStatus((s) => (s.includes("loaded") ? s : "No pads to display (no rows)."));
-      return;
-    }
-    if (!padRef.current.ready || !padRef.current.geom) {
-      setStatus((s) => (s.includes("pad_2") ? s : "Waiting for pad_2.stl…"));
+      setStatus("No data rows to deploy.");
       return;
     }
 
-    // room size for placement bounds
+    if (!padRef.current.ready || !padRef.current.geom) {
+      setStatus("Waiting for pad_2.stl to load…");
+      return;
+    }
+
+    setStatus(`Deploying ${rows.length} pads…`);
+
     const lengthM =
       spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
     const widthM =
       spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
 
-    const halfL = lengthM / 2;
-    const halfW = widthM / 2;
+    const margin = 0.18;
+    const halfL = lengthM / 2 - margin;
+    const halfW = widthM / 2 - margin;
 
-    // try to read coordinates from the row (if you have them)
-    const getX = (r) =>
-      toNumber(getField(r, "X", "PosX", "PositionX", "X(m)", "X_m", "Xcoord", "ColumnX"));
-    const getZ = (r) =>
-      toNumber(getField(r, "Z", "PosZ", "PositionZ", "Z(m)", "Z_m", "Zcoord", "RowZ"));
+    const maxDistCm =
+      Math.max(...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)) ||
+      0;
 
-    // split by layer (bottom to top)
-    const byLayer = [[], [], [], []];
-    for (const r of rows) byLayer[parseLayerIndex(getField(r, "Layer"))].push(r);
+    const SPREAD = maxDistCm >= 20 ? 1 : 30;
 
-    // pad spacing: if you have coordinates, we use them.
-    // otherwise, we auto-pack each layer into a grid.
-    const padYGap = 0.07; // separation per layer so they don't overlap visually
+    const cols = Math.max(6, Math.ceil(Math.sqrt(rows.length)));
+    const cellX = (halfL * 2) / (cols + 1);
+    const cellZ = (halfW * 2) / (cols + 1);
 
-    const placed = [];
+    let north = -Infinity,
+      south = Infinity,
+      east = -Infinity,
+      west = Infinity;
 
-    for (let li = 0; li < 4; li++) {
-      const layerRows = byLayer[li];
-      if (!layerRows.length) continue;
+    const centroid = new THREE.Vector3(0, 0, 0);
+    let count = 0;
 
-      // do we have coordinates?
-      const coordCount = layerRows.reduce((acc, r) => acc + (getX(r) != null && getZ(r) != null ? 1 : 0), 0);
-      const hasCoords = coordCount / layerRows.length > 0.7;
+    const PAD_WORLD_SIZE = 0.22;
+    const LAYER_STEP = 0.45;
+    const BASE_Y = 0.02;
 
-      if (hasCoords) {
-        for (const r of layerRows) {
-          // if coords are in CM, they’ll be huge; assume meters if abs <= 20, otherwise cm->m
-          let x = getX(r);
-          let z = getZ(r);
-          if (x == null || z == null) continue;
+    const selectedType = focusClass === "hotspot" ? "hot" : focusClass === "deadspot" ? "dead" : null;
 
-          const looksLikeCm = Math.abs(x) > 20 || Math.abs(z) > 20;
-          if (looksLikeCm) {
-            x = x / 100;
-            z = z / 100;
-          }
+    rows.forEach((row, index) => {
+      const angleDeg = toNumber(getField(row, "Angle"));
+      const distCm = toNumber(getField(row, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV"));
 
-          // clamp into room
-          x = THREE.MathUtils.clamp(x, -halfL + 0.08, halfL - 0.08);
-          z = THREE.MathUtils.clamp(z, -halfW + 0.08, halfW - 0.08);
+      let x, z;
 
-          placed.push({ row: r, x, z, y: 0.001 + li * padYGap });
-        }
+      if (angleDeg != null && distCm != null && distCm > 0) {
+        const theta = (angleDeg * Math.PI) / 180;
+        const distM = (distCm / 100) * SPREAD;
+        x = THREE.MathUtils.clamp(Math.cos(theta) * distM, -halfL, halfL);
+        z = THREE.MathUtils.clamp(Math.sin(theta) * distM, -halfW, halfW);
       } else {
-        // auto grid inside the room
-        const n = layerRows.length;
-        const cols = Math.ceil(Math.sqrt(n));
-        const rowsN = Math.ceil(n / cols);
-
-        const margin = 0.16;
-        const usableL = Math.max(0.5, lengthM - margin * 2);
-        const usableW = Math.max(0.5, widthM - margin * 2);
-
-        const stepX = usableL / Math.max(1, cols);
-        const stepZ = usableW / Math.max(1, rowsN);
-
-        for (let i = 0; i < n; i++) {
-          const c = i % cols;
-          const rr = Math.floor(i / cols);
-
-          const x = -usableL / 2 + stepX / 2 + c * stepX;
-          const z = -usableW / 2 + stepZ / 2 + rr * stepZ;
-
-          placed.push({ row: layerRows[i], x, z, y: 0.001 + li * padYGap });
-        }
+        const r = Math.floor(index / cols);
+        const c = index % cols;
+        x = -halfL + cellX * (c + 1);
+        z = -halfW + cellZ * (r + 1);
       }
-    }
 
-    if (!placed.length) {
-      setStatus("No pads placed (missing coords + empty layers).");
-      return;
-    }
+      const layerIndex = parseLayerIndex(getField(row, "Layer") ?? "Layer 1");
+      const y = BASE_Y + layerIndex * LAYER_STEP;
 
-    // build InstancedMesh
-    const geom = padRef.current.geom;
-    const mat = matsRef.current.neutral.clone(); // we'll use instanceColor
-    mat.vertexColors = true;
+      north = Math.max(north, z);
+      south = Math.min(south, z);
+      east = Math.max(east, x);
+      west = Math.min(west, x);
 
-    const inst = new THREE.InstancedMesh(geom, mat, placed.length);
-    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      centroid.add(new THREE.Vector3(x, 0, z));
+      count++;
 
-    // IMPORTANT for raycaster + colors
-    inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(placed.length * 3), 3);
+      const cls = normClass(getField(row, "Classification") ?? "neutral");
 
-    const tmpObj = new THREE.Object3D();
-    const color = new THREE.Color();
+      let baseMat =
+        cls.includes("hot") ? matsRef.current.hot : cls.includes("dead") ? matsRef.current.dead : matsRef.current.neutral;
 
-    for (let i = 0; i < placed.length; i++) {
-      const { row, x, z, y } = placed[i];
+      if (viewMode === "after" && isApplied && selectedType && cls.includes(selectedType)) {
+        baseMat = matsRef.current.treated;
+      }
 
-      // choose base color
-      const cls = normClass(getField(row, "Classification") ?? "");
-      const base =
-        viewMode === "after" && isApplied && focusClass !== "all"
-          ? 0x2ecc71
-          : cls.includes("hot")
-          ? 0x7c0a02
-          : cls.includes("dead")
-          ? 0x0e4c92
-          : 0xf0f0f0;
+      const padMesh = new THREE.Mesh(padRef.current.geom.clone(), baseMat);
 
-      color.setHex(base);
-      inst.setColorAt(i, color);
+      // ✅ IMPORTANT: keep your original scaling style, but add fixYaw for facing
+      const finalScale = padRef.current.baseScale * PAD_WORLD_SIZE;
+      padMesh.scale.setScalar(finalScale);
+      padMesh.rotation.y = padRef.current.fixYaw || 0;
 
-      tmpObj.position.set(x, y, z);
+      padMesh.position.set(x, y, z);
+      padMesh.userData = { row, index };
+      padsGroup.add(padMesh);
+    });
 
-      // ✅ ensure pads stand on the ground, with consistent facing
-      tmpObj.rotation.set(0, padRef.current.fixYaw || 0, 0);
+    const c = count ? centroid.multiplyScalar(1 / count) : new THREE.Vector3(0, 0, 0);
+    const px = THREE.MathUtils.clamp(c.x, -halfL + 0.2, halfL - 0.2);
+    const pz = THREE.MathUtils.clamp(c.z, -halfW + 0.2, halfW - 0.2);
 
-      // scale from STL normalization
-      const s = padRef.current.baseScale || 1;
-      tmpObj.scale.setScalar(s);
+    if (protoRef.current.mesh) protoRef.current.mesh.position.set(px, 0, pz);
+    else if (protoRef.current.fallbackBox) protoRef.current.fallbackBox.position.set(px, 0.125, pz);
 
-      tmpObj.updateMatrix();
-      inst.setMatrixAt(i, tmpObj.matrix);
-    }
+    setMeasureOrigin({ x: px, z: pz });
 
-    inst.instanceMatrix.needsUpdate = true;
-    inst.instanceColor.needsUpdate = true;
+    const roomWidth = east - west + 0.6;
+    const roomDepth = north - south + 0.6;
+    const cx = (east + west) / 2;
+    const cz = (north + south) / 2;
 
-    padsGroup.add(inst);
+    const maxDim = Math.max(roomWidth, roomDepth, 3);
+    camera.position.set(cx, maxDim * 0.9, cz + maxDim * 1.3);
+    controls.target.set(cx, 1.1, cz);
+    controls.update();
 
-    instMapRef.current.mesh = inst;
-    instMapRef.current.rows = placed.map((p) => p.row);
-
-    setStatus((s) => (s.includes("loaded") ? s : "Pads rendered ✅"));
-  }, [rowsFor3D, spatial, focusClass, viewMode, isApplied]);
+    setStatus(`Deployed ✅ ${rows.length} pads`);
+  }, [rowsFor3D, spatial, padReadyTick, protoReadyTick, focusClass, viewMode, isApplied]);
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>
@@ -1327,10 +1166,15 @@ function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
           fontSize: 12,
           zIndex: 30,
           pointerEvents: "none",
-          maxWidth: 460,
+          maxWidth: 420,
         }}
       >
         {status}
+        <div style={{ opacity: 0.85, marginTop: 4 }}>
+          PAD_URL: {PAD_URL}
+          <br />
+          PROTO: {PROTOTYPE_URLS[0]} / {PROTOTYPE_URLS[1]}
+        </div>
       </div>
 
       {tip.show && (
