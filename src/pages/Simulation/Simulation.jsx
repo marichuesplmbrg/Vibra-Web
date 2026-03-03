@@ -4,12 +4,6 @@ import "./Simulation.css";
 import Slide1 from "./Slide1/Slide1";
 import Slide2 from "./Slide2/Slide2";
 
-// ✅ Prototype URL (make sure filename is correct in src/assets)
-const prototypeUrl = new URL(
-  "../../assets/Prototype-stripped.stl",
-  import.meta.url
-).href;
-
 /* =========================
    HELPERS
 ========================= */
@@ -21,7 +15,6 @@ const norm = (v) =>
     .toLowerCase();
 
 function toNumber(value) {
-  // Works with "0", "0°", " 90 ", etc.
   const n = Number(String(value ?? "").replace(/[^\d.\-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
@@ -51,32 +44,51 @@ function downloadCSV(filename, rows) {
 }
 
 /* =========================
-   SPATIAL (LAYER 1 ONLY)
+   SPATIAL (FALLBACK ACROSS LAYERS)
    LengthCm = U(0) + U(180)
-   WidthCm  = U(90) + U(270)
+   WidthCm  = U(90) + U(271)
 ========================= */
 const normalizeDeg = (deg) => {
   if (deg == null) return null;
   return ((deg % 360) + 360) % 360;
 };
 
-const snapCardinal = (deg, tol = 3) => {
+const snapToTargets = (deg, targets, tol = 3) => {
   if (deg == null) return null;
   const d = normalizeDeg(deg);
-  const cardinals = [0, 90, 180, 270];
 
   let best = null;
   let bestDiff = Infinity;
 
-  for (const c of cardinals) {
-    const diff = Math.min(Math.abs(d - c), 360 - Math.abs(d - c));
+  for (const t of targets) {
+    const diff = Math.min(Math.abs(d - t), 360 - Math.abs(d - t));
     if (diff < bestDiff) {
       bestDiff = diff;
-      best = c;
+      best = t;
     }
   }
   return bestDiff <= tol ? best : null;
 };
+
+function pickUltrasonicWithFallback(allRows, targetAngle, tol = 3) {
+  const priorityLayers = ["Layer 1", "Layer 2", "Layer 3", "Layer 4"];
+  const targets = [0, 90, 180, 271];
+
+  for (const layer of priorityLayers) {
+    const layerRows = allRows.filter((r) => norm(r.Layer) === norm(layer));
+
+    for (const r of layerRows) {
+      const a = toNumber(r.Angle);
+      const snapped = snapToTargets(a, targets, tol);
+      if (snapped !== targetAngle) continue;
+
+      const cm = toNumber(r.Ultrasonic);
+      if (cm != null) return { value: cm, fromLayer: layer };
+    }
+  }
+
+  return { value: null, fromLayer: "" };
+}
 
 export default function Simulation() {
   const slides = useMemo(() => [0, 1], []);
@@ -97,7 +109,6 @@ export default function Simulation() {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [sortValue, setSortValue] = useState(null);
 
-  // ✅ rows shown on table (filters + search)
   const displayedRows = useMemo(() => {
     let rows = [...rawRows];
 
@@ -120,35 +131,23 @@ export default function Simulation() {
     return rows;
   }, [rawRows, appliedSearch, sortValue]);
 
-  // ✅ SPATIAL: use ONLY Layer 1 ultrasonic angles for L/W
   const spatial = useMemo(() => {
-    const layer1 = rawRows.filter((r) => norm(r.Layer) === norm("Layer 1"));
+    const p0 = pickUltrasonicWithFallback(rawRows, 0, 3);
+    const p180 = pickUltrasonicWithFallback(rawRows, 180, 3);
+    const p90 = pickUltrasonicWithFallback(rawRows, 90, 3);
+    const p271 = pickUltrasonicWithFallback(rawRows, 271, 3);
 
-    const buckets = { 0: [], 90: [], 180: [], 270: [] };
+    const u0 = p0.value;
+    const u180 = p180.value;
+    const u90 = p90.value;
+    const u271 = p271.value;
 
-    for (const r of layer1) {
-      const snapped = snapCardinal(toNumber(r.Angle), 3);
-      if (snapped == null) continue;
-
-      const cm = toNumber(r.Ultrasonic);
-      if (cm != null) buckets[snapped].push(cm);
-    }
-
-    // First value found at each cardinal angle (Layer 1)
-    const u0 = buckets[0][0] ?? null;
-    const u180 = buckets[180][0] ?? null;
-    const u90 = buckets[90][0] ?? null;
-    const u270 = buckets[270][0] ?? null;
-
-    // ✅ EXACT RULES:
     const lengthCm = u0 != null && u180 != null ? u0 + u180 : null;
-    const widthCm = u90 != null && u270 != null ? u90 + u270 : null;
+    const widthCm = u90 != null && u271 != null ? u90 + u271 : null;
 
-    // Height: first available (cm)
     const hRow = rawRows.find((r) => String(r.HeightRaw ?? "").trim() !== "") || null;
     const heightRaw = hRow?.HeightRaw ?? "";
 
-    // Area in m²
     const lengthM = lengthCm == null ? null : lengthCm / 100;
     const widthM = widthCm == null ? null : widthCm / 100;
     const area = lengthM != null && widthM != null ? lengthM * widthM : null;
@@ -160,8 +159,16 @@ export default function Simulation() {
       heightRaw,
       area,
       qualified,
-      // optional: for debugging
-      debug: { u0, u180, u90, u270 },
+      debug: {
+        u0,
+        u0From: p0.fromLayer,
+        u180,
+        u180From: p180.fromLayer,
+        u90,
+        u90From: p90.fromLayer,
+        u271,
+        u271From: p271.fromLayer,
+      },
     };
   }, [rawRows]);
 
@@ -178,6 +185,7 @@ export default function Simulation() {
     setSlide(0);
   };
 
+  // ✅ ALWAYS deploy (qualified OR not)
   const deploy = () => {
     setDeployedRows(displayedRows);
     setSlide(1);
@@ -205,7 +213,7 @@ export default function Simulation() {
           setUploadStatus={setUploadStatus}
         />
       ) : (
-        <Slide2 rowsFor3D={deployedRows} spatial={spatial} prototypeUrl={prototypeUrl} />
+        <Slide2 rowsFor3D={deployedRows} spatial={spatial} />
       )}
 
       <div className="sim-controls">

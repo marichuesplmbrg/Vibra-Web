@@ -97,6 +97,18 @@ function getVal(row, keys) {
   return "";
 }
 
+function parseAngleToNumber(v) {
+  const s = String(v ?? "").trim();
+  const n = Number(s.replace("°", "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeAngleForLayer(angleStr, layerLabel) {
+  const n = parseAngleToNumber(angleStr);
+  if (layerLabel === "Layer 1" && n === 270) return "271";
+  return String(angleStr ?? "").trim();
+}
+
 export default function Slide1({
   rawRows,
   setRawRows,
@@ -117,11 +129,23 @@ export default function Slide1({
   const [showSort, setShowSort] = useState(false);
   const fileInputRef = useRef(null);
 
+  // ✅ NEW: NOT QUALIFIED popup timer
+  const [showNotQualified, setShowNotQualified] = useState(false);
+
   useEffect(() => {
     if (uploadStatus.type === "idle") return;
     const timer = setTimeout(() => setUploadStatus({ type: "idle", message: "" }), 5000);
     return () => clearTimeout(timer);
   }, [uploadStatus, setUploadStatus]);
+
+  // ✅ NEW: show popup when room becomes not qualified
+  useEffect(() => {
+    if (spatial?.qualified === false && spatial?.area != null) {
+      setShowNotQualified(true);
+      const t = setTimeout(() => setShowNotQualified(false), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [spatial?.qualified, spatial?.area]);
 
   const handleImportCloud = async () => {
     try {
@@ -142,18 +166,23 @@ export default function Slide1({
 
         const sheetRows = parseCSV(text);
 
-        const cleaned = sheetRows.map((r) => ({
-          Angle: getVal(r, ["angle"]),
-          Decibel: getVal(r, ["db", "dB", "decibel"]),
-          Ultrasonic: getVal(r, ["utv", "ultrasonic", "ultrasonicvalue"]),
-          RT60: getVal(r, ["rt60", "reverberation", "rt60value"]),
-          Classification: getVal(r, ["class", "classification"]),
-          Layer: layer.label,
+        const cleaned = sheetRows.map((r) => {
+          const angleRaw = getVal(r, ["angle"]);
+          const angleFixed = normalizeAngleForLayer(angleRaw, layer.label);
 
-          LengthRaw: getVal(r, ["length"]),
-          WidthRaw: getVal(r, ["width"]),
-          HeightRaw: getVal(r, ["utvh", "height", "heightraw"]),
-        }));
+          return {
+            Angle: angleFixed,
+            Decibel: getVal(r, ["db", "dB", "decibel"]),
+            Ultrasonic: getVal(r, ["utv", "ultrasonic", "ultrasonicvalue"]),
+            RT60: getVal(r, ["rt60", "reverberation", "rt60value"]),
+            Classification: getVal(r, ["class", "classification"]),
+            Layer: layer.label,
+
+            LengthRaw: getVal(r, ["length"]),
+            WidthRaw: getVal(r, ["width"]),
+            HeightRaw: getVal(r, ["utvh", "height", "heightraw"]),
+          };
+        });
 
         allRows.push(...cleaned);
       }
@@ -199,17 +228,23 @@ export default function Slide1({
         const rows = parseCSV(String(text));
         if (!rows.length) throw new Error("CSV has no data rows.");
 
-        const cleaned = rows.map((r) => ({
-          Angle: getVal(r, ["angle"]),
-          Decibel: getVal(r, ["db", "dB", "decibel"]),
-          Ultrasonic: getVal(r, ["utv", "ultrasonic"]),
-          RT60: getVal(r, ["rt60", "reverberation"]),
-          HeightRaw: getVal(r, ["utvh", "height", "heightraw"]),
-          Classification: getVal(r, ["class", "classification"]),
-          Layer: getVal(r, ["layer"]) || "Local",
-          LengthRaw: getVal(r, ["length"]),
-          WidthRaw: getVal(r, ["width"]),
-        }));
+        const cleaned = rows.map((r) => {
+          const layer = getVal(r, ["layer"]) || "Local";
+          const angleRaw = getVal(r, ["angle"]);
+          const angleFixed = normalizeAngleForLayer(angleRaw, layer);
+
+          return {
+            Angle: angleFixed,
+            Decibel: getVal(r, ["db", "dB", "decibel"]),
+            Ultrasonic: getVal(r, ["utv", "ultrasonic"]),
+            RT60: getVal(r, ["rt60", "reverberation"]),
+            HeightRaw: getVal(r, ["utvh", "height", "heightraw"]),
+            Classification: getVal(r, ["class", "classification"]),
+            Layer: layer,
+            LengthRaw: getVal(r, ["length"]),
+            WidthRaw: getVal(r, ["width"]),
+          };
+        });
 
         setRawRows(cleaned);
 
@@ -406,10 +441,17 @@ export default function Slide1({
         </div>
 
         {/* RIGHT */}
-        <div className="glass-card glass-card--spatial">
+        <div className="glass-card glass-card--spatial" style={{ position: "relative" }}>
           <h2 className="card-title">SPATIAL STATUS</h2>
 
           <p className="label">PHYSICAL DIMENSION:</p>
+
+          {/* ✅ NEW POPUP INSIDE SPATIAL BOX */}
+          {showNotQualified && (
+            <div className="not-qualified-popup">
+              ⚠ NOT QUALIFIED
+            </div>
+          )}
 
           <div className="dimension-input">
             <span className="dimension-text">Length: {formatCm(spatial.lengthCm)}</span>

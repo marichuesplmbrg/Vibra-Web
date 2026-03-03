@@ -14,7 +14,7 @@ const joinBase = (p) => `${BASE}${String(p).replace(/^\/+/, "")}`;
 const PAD_URL = joinBase("models/pad_2.stl");
 const PROTOTYPE_URLS = [
   joinBase("models/Prototype-stripped.stl"),
-  joinBase("models/Protoype-stripped.stl"), // fallback (typo)
+  joinBase("models/Protoype-stripped.stl"),
 ];
 
 /* =========================
@@ -55,7 +55,7 @@ function parseLayerIndex(layerVal) {
   const raw = String(layerVal ?? "").toLowerCase();
   const m = raw.match(/(\d+)/);
   const n = m ? Number(m[1]) : 1;
-  return Math.min(3, Math.max(0, n - 1)); // 0..3
+  return Math.min(3, Math.max(0, n - 1));
 }
 
 /* =========================
@@ -121,7 +121,6 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
   bb.getCenter(center);
   const minY = bb.min.y;
 
-  // center XZ + ground on Y=0
   g.translate(-center.x, -minY, -center.z);
 
   g.computeBoundingBox();
@@ -136,256 +135,6 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
 }
 
 /* =========================
-   MEASUREMENT GRID (CM)
-========================= */
-function makeFloorTextMesh(text, { fontSize = 56 } = {}) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  canvas.width = 256;
-  canvas.height = 128;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = `bold ${fontSize}px Arial`;
-  ctx.fillStyle = "rgba(0, 229, 255, 0.95)";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.DoubleSide,
-  });
-
-  const geo = new THREE.PlaneGeometry(0.18, 0.09);
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.renderOrder = 10;
-  return mesh;
-}
-
-function addMeasurementGridCm({
-  parent,
-  lengthM,
-  widthM,
-  originX = 0,
-  originZ = 0,
-  minorCm = 10,
-  majorCm = 50,
-  y = 0.002,
-}) {
-  const group = new THREE.Group();
-  group.name = "MeasurementGridCM";
-
-  const halfL = lengthM / 2;
-  const halfW = widthM / 2;
-
-  const minorM = minorCm / 100;
-  const majorM = majorCm / 100;
-
-  const minorMat = new THREE.LineBasicMaterial({
-    color: 0x00c8ff,
-    transparent: true,
-    opacity: 0.18,
-  });
-
-  const majorMat = new THREE.LineBasicMaterial({
-    color: 0x00e5ff,
-    transparent: true,
-    opacity: 0.6,
-  });
-
-  const makeLine = (x1, z1, x2, z2, mat) => {
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(x1, y, z1),
-      new THREE.Vector3(x2, y, z2),
-    ]);
-    const line = new THREE.Line(geo, mat);
-    line.renderOrder = 1;
-    return line;
-  };
-
-  const isMajor = (from0, step) => {
-    const n = from0 / step;
-    return Math.abs(n - Math.round(n)) < 1e-6;
-  };
-
-  for (let x = -halfL; x <= halfL + 1e-6; x += minorM) {
-    const from0 = x + halfL;
-    group.add(makeLine(x, -halfW, x, halfW, isMajor(from0, majorM) ? majorMat : minorMat));
-  }
-  for (let z = -halfW; z <= halfW + 1e-6; z += minorM) {
-    const from0 = z + halfW;
-    group.add(makeLine(-halfL, z, halfL, z, isMajor(from0, majorM) ? majorMat : minorMat));
-  }
-
-  const labelY = y + 0.004;
-  const labelLineZ = THREE.MathUtils.clamp(originZ, -halfW, halfW);
-  const labelLineX = THREE.MathUtils.clamp(originX, -halfL, halfL);
-
-  for (let x = -halfL; x <= halfL + 1e-6; x += majorM) {
-    const cmFromOrigin = Math.round((x - originX) * 100);
-    const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
-    t.position.set(x, labelY, labelLineZ);
-    group.add(t);
-  }
-
-  for (let z = -halfW; z <= halfW + 1e-6; z += majorM) {
-    const cmFromOrigin = Math.round((z - originZ) * 100);
-    const t = makeFloorTextMesh(`${cmFromOrigin} cm`, { fontSize: 56 });
-    t.position.set(labelLineX, labelY, z);
-    t.rotation.z = Math.PI / 2;
-    group.add(t);
-  }
-
-  parent.add(group);
-  return group;
-}
-
-/* =========================
-   WALL RULERS (CM)
-========================= */
-function makeWallTextMesh(text, { fontSize = 54 } = {}) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  canvas.width = 256;
-  canvas.height = 128;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = `bold ${fontSize}px Arial`;
-  ctx.fillStyle = "rgba(0, 229, 255, 0.95)";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.DoubleSide,
-  });
-
-  const geo = new THREE.PlaneGeometry(0.18, 0.09);
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.renderOrder = 10;
-  return mesh;
-}
-
-function addWallRulersCm({
-  parent,
-  lengthM,
-  widthM,
-  heightM,
-  wallThickness = 0.05,
-  minorCm = 10,
-  majorCm = 50,
-  surfaceOffset = 0.002,
-}) {
-  const group = new THREE.Group();
-  group.name = "WallRulersCM";
-
-  const minorM = minorCm / 100;
-  const majorM = majorCm / 100;
-
-  const minorMat = new THREE.LineBasicMaterial({
-    color: 0x00c8ff,
-    transparent: true,
-    opacity: 0.25,
-  });
-
-  const majorMat = new THREE.LineBasicMaterial({
-    color: 0x00e5ff,
-    transparent: true,
-    opacity: 0.7,
-  });
-
-  const makeLine = (a, b, mat) => {
-    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-    const line = new THREE.Line(geo, mat);
-    line.renderOrder = 2;
-    return line;
-  };
-
-  const isMajor = (valM) => {
-    const n = valM / majorM;
-    return Math.abs(n - Math.round(n)) < 1e-6;
-  };
-
-  const halfL = lengthM / 2;
-  const halfW = widthM / 2;
-
-  const zWall = -halfW + wallThickness / 2 + surfaceOffset;
-
-  // HEIGHT ruler
-  {
-    const xRuler = -halfL + 0.12;
-    for (let y = 0; y <= heightM + 1e-6; y += minorM) {
-      const major = isMajor(y);
-      const tickLen = major ? 0.18 : 0.1;
-
-      group.add(
-        makeLine(
-          new THREE.Vector3(xRuler, y, zWall),
-          new THREE.Vector3(xRuler + tickLen, y, zWall),
-          major ? majorMat : minorMat
-        )
-      );
-
-      if (major) {
-        const cm = Math.round(y * 100);
-        const t = makeWallTextMesh(`${cm} cm`, { fontSize: 54 });
-        t.position.set(xRuler + tickLen + 0.12, y, zWall);
-        group.add(t);
-      }
-    }
-  }
-
-  // LENGTH ruler
-  {
-    const yRuler = 0.22;
-    for (let x = -halfL; x <= halfL + 1e-6; x += minorM) {
-      const fromLeft = x + halfL;
-      const major = isMajor(fromLeft);
-      const tickLen = major ? 0.16 : 0.09;
-
-      group.add(
-        makeLine(
-          new THREE.Vector3(x, yRuler, zWall),
-          new THREE.Vector3(x, yRuler + tickLen, zWall),
-          major ? majorMat : minorMat
-        )
-      );
-
-      if (major) {
-        const cm = Math.round(fromLeft * 100);
-        const t = makeWallTextMesh(`${cm} cm`, { fontSize: 54 });
-        t.position.set(x, yRuler + tickLen + 0.1, zWall);
-        t.rotation.z = Math.PI / 2;
-        group.add(t);
-      }
-    }
-  }
-
-  parent.add(group);
-  return group;
-}
-
-/* =========================
    RECOMMENDATION CONTENT
 ========================= */
 const TREATMENT = {
@@ -396,22 +145,10 @@ const TREATMENT = {
       desc:
         "Bass traps help reduce low-frequency build-up and smooth the room response. They are usually placed in corners and wall–ceiling corners where bass energy collects.",
       options: [
-        {
-          name: "Rockwool / Mineral Wool Corner Bass Trap",
-          text: "Common DIY/pro option.",
-        },
-        {
-          name: "Foam Corner Bass Trap",
-          text: "Easy to buy. Works mainly on mid/high-bass.",
-        },
-        {
-          name: "Panel Bass Trap",
-          text: "Thicker wall panels placed at corners/first reflections.",
-        },
-        {
-          name: "Tube / Cylindrical Bass Trap",
-          text: "Portable and repositionable.",
-        },
+        { name: "Rockwool / Mineral Wool Corner Bass Trap", text: "Common DIY/pro option." },
+        { name: "Foam Corner Bass Trap", text: "Easy to buy. Works mainly on mid/high-bass." },
+        { name: "Panel Bass Trap", text: "Thicker wall panels placed at corners/first reflections." },
+        { name: "Tube / Cylindrical Bass Trap", text: "Portable and repositionable." },
       ],
       footnote: "Tip: Corner placement usually gives the biggest improvement for hotspots.",
     },
@@ -440,11 +177,14 @@ const TREATMENT = {
 export default function Slide2({ rowsFor3D, spatial }) {
   const hasData = Array.isArray(rowsFor3D) && rowsFor3D.length > 0;
 
-  const [focusClass, setFocusClass] = useState("all"); // all | hotspot | deadspot
+  // ✅ NEW: qualification gate
+  const isQualified = spatial?.qualified === true;
+
+  const [focusClass, setFocusClass] = useState("all");
   const [showGuide, setShowGuide] = useState(false);
 
   const [applied, setApplied] = useState({ hotspot: false, deadspot: false });
-  const [viewMode, setViewMode] = useState("before"); // before | after
+  const [viewMode, setViewMode] = useState("before");
 
   const counts = useMemo(() => {
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
@@ -471,12 +211,17 @@ export default function Slide2({ rowsFor3D, spatial }) {
   useEffect(() => setViewMode("before"), [focusClass]);
 
   const activeTreat =
-    focusClass === "hotspot" ? TREATMENT.hotspot : focusClass === "deadspot" ? TREATMENT.deadspot : null;
+    focusClass === "hotspot"
+      ? TREATMENT.hotspot
+      : focusClass === "deadspot"
+      ? TREATMENT.deadspot
+      : null;
 
   const isApplied =
     focusClass === "hotspot" ? applied.hotspot : focusClass === "deadspot" ? applied.deadspot : false;
 
-  const canTreat = hasData && focusClass !== "all";
+  // ✅ NEW: only allow treatment when qualified
+  const canTreat = hasData && focusClass !== "all" && isQualified;
 
   const applyTreatment = () => {
     if (!canTreat) return;
@@ -499,7 +244,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
               spatial={spatial}
               focusClass={focusClass}
               viewMode={viewMode}
-              isApplied={isApplied}
+              isApplied={isApplied && isQualified}
             />
 
             <div className="three-legend">
@@ -592,6 +337,15 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   Please import and deploy your data in <b>Slide 1</b> first.
                 </div>
               </div>
+            ) : !isQualified ? (
+              <div className="info-card">
+                <div className="info-title" style={{ color: "#ff4d4d" }}>
+                  No Recommendation
+                </div>
+                <div className="info-text">
+                  The room is <b>NOT QUALIFIED</b>. Simulation is available, but recommendations are disabled.
+                </div>
+              </div>
             ) : (
               <>
                 <div className="select-card">
@@ -636,7 +390,7 @@ export default function Slide2({ rowsFor3D, spatial }) {
                           type="button"
                           className="apply-btn"
                           onClick={applyTreatment}
-                          disabled={isApplied}
+                          disabled={!canTreat || isApplied}
                         >
                           {isApplied ? "Applied ✓" : "Apply Treatment"}
                         </button>
@@ -690,9 +444,85 @@ export default function Slide2({ rowsFor3D, spatial }) {
 }
 
 /* =========================
+   SAFE GRID + WALL RULER HELPERS
+   (Prevents blank screen if missing)
+========================= */
+
+function addMeasurementGridCm({
+  parent,
+  lengthM,
+  widthM,
+  originX = 0,
+  originZ = 0,
+  minorCm = 10,
+  majorCm = 50,
+  y = 0.002,
+}) {
+  if (!parent) return;
+
+  const group = new THREE.Group();
+
+  const halfL = lengthM / 2;
+  const halfW = widthM / 2;
+
+  const minorM = minorCm / 100;
+  const majorM = majorCm / 100;
+
+  const minorMat = new THREE.LineBasicMaterial({
+    color: 0x00c8ff,
+    transparent: true,
+    opacity: 0.15,
+  });
+
+  const makeLine = (x1, z1, x2, z2) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x1, y, z1),
+      new THREE.Vector3(x2, y, z2),
+    ]);
+    return new THREE.Line(geo, minorMat);
+  };
+
+  for (let x = -halfL; x <= halfL; x += minorM) {
+    group.add(makeLine(x, -halfW, x, halfW));
+  }
+
+  for (let z = -halfW; z <= halfW; z += minorM) {
+    group.add(makeLine(-halfL, z, halfL, z));
+  }
+
+  parent.add(group);
+}
+
+function addWallRulersCm({
+  parent,
+  lengthM,
+  widthM,
+  heightM,
+  wallThickness = 0.05,
+}) {
+  if (!parent) return;
+
+  const group = new THREE.Group();
+
+  const mat = new THREE.LineBasicMaterial({
+    color: 0x00e5ff,
+    transparent: true,
+    opacity: 0.25,
+  });
+
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-lengthM / 2, 0, -widthM / 2),
+    new THREE.Vector3(-lengthM / 2, heightM, -widthM / 2),
+  ]);
+
+  group.add(new THREE.Line(geo, mat));
+  parent.add(group);
+}
+
+/* =========================
    THREE ROOM
 ========================= */
-function ThreeRoom({ rowsFor3D, spatial, focusClass, viewMode, isApplied }) {
+function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isApplied }) {
   const mountRef = useRef(null);
   const [tip, setTip] = useState({ show: false, x: 0, y: 0, text: "" });
   const [status, setStatus] = useState("Initializing 3D…");
