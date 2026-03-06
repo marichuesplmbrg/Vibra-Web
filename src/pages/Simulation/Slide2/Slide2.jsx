@@ -58,6 +58,17 @@ function parseLayerIndex(layerVal) {
   return Math.min(3, Math.max(0, n - 1));
 }
 
+function normalizeAngle360(deg) {
+  const n = Number(deg);
+  if (!Number.isFinite(n)) return null;
+  return ((n % 360) + 360) % 360;
+}
+
+function smallestAngleDiff(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
 /* =========================
    STL async loaders
 ========================= */
@@ -135,6 +146,210 @@ function groundCenterAndScale(geom, targetSize = 1.0) {
 }
 
 /* =========================
+   ROOM BOUNDS FROM CARDINAL ANGLES
+   0   = NORTH
+   90  = EAST
+   180 = SOUTH
+   270 = WEST
+========================= */
+function computeRoomBoundsFromRows(allRows = [], spatial = {}) {
+  const CARDINAL_TOLERANCE = 8;
+  const WALL_MARGIN_M = 0.28;
+
+  const northVals = [];
+  const eastVals = [];
+  const southVals = [];
+  const westVals = [];
+
+  for (const row of allRows) {
+    const angle = normalizeAngle360(toNumber(getField(row, "Angle")));
+    const distCm = toNumber(
+      getField(row, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")
+    );
+    if (angle == null || distCm == null || distCm <= 0) continue;
+
+    const distM = distCm / 100;
+
+    if (smallestAngleDiff(angle, 0) <= CARDINAL_TOLERANCE) northVals.push(distM);
+    if (smallestAngleDiff(angle, 90) <= CARDINAL_TOLERANCE) eastVals.push(distM);
+    if (smallestAngleDiff(angle, 180) <= CARDINAL_TOLERANCE) southVals.push(distM);
+    if (smallestAngleDiff(angle, 270) <= CARDINAL_TOLERANCE) westVals.push(distM);
+  }
+
+  const spatialLengthM =
+    spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm)
+      ? spatial.lengthCm / 100
+      : 5.6;
+
+  const spatialWidthM =
+    spatial?.widthCm != null && Number.isFinite(spatial.widthCm)
+      ? spatial.widthCm / 100
+      : 3.2;
+
+  const fallbackNorth = spatialWidthM / 2;
+  const fallbackSouth = spatialWidthM / 2;
+  const fallbackEast = spatialLengthM / 2;
+  const fallbackWest = spatialLengthM / 2;
+
+  const north = (northVals.length ? Math.max(...northVals) : fallbackNorth) + WALL_MARGIN_M;
+  const east = (eastVals.length ? Math.max(...eastVals) : fallbackEast) + WALL_MARGIN_M;
+  const south = (southVals.length ? Math.max(...southVals) : fallbackSouth) + WALL_MARGIN_M;
+  const west = (westVals.length ? Math.max(...westVals) : fallbackWest) + WALL_MARGIN_M;
+
+  return {
+    north,
+    east,
+    south,
+    west,
+    lengthM: east + west,
+    widthM: north + south,
+    minX: -west,
+    maxX: east,
+    minZ: -north,
+    maxZ: south,
+    centerX: (east - west) / 2,
+    centerZ: (south - north) / 2,
+  };
+}
+
+/* =========================
+   GRID + WALL RULERS
+========================= */
+function addMeasurementGridFromPrototype({
+  parent,
+  bounds,
+  y = 0.002,
+  minorCm = 10,
+  majorCm = 50,
+}) {
+  if (!parent || !bounds) return;
+
+  const group = new THREE.Group();
+  const minorStep = minorCm / 100;
+
+  const minorMat = new THREE.LineBasicMaterial({
+    color: 0x00c8ff,
+    transparent: true,
+    opacity: 0.14,
+  });
+
+  const majorMat = new THREE.LineBasicMaterial({
+    color: 0x00e5ff,
+    transparent: true,
+    opacity: 0.28,
+  });
+
+  const makeLine = (x1, z1, x2, z2, material) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x1, y, z1),
+      new THREE.Vector3(x2, y, z2),
+    ]);
+    return new THREE.Line(geo, material);
+  };
+
+  for (let x = bounds.minX; x <= bounds.maxX + 1e-6; x += minorStep) {
+    const cmFromPrototype = Math.round(Math.abs(x) * 100);
+    const isMajor = cmFromPrototype % majorCm === 0;
+    group.add(makeLine(x, bounds.minZ, x, bounds.maxZ, isMajor ? majorMat : minorMat));
+  }
+
+  for (let z = bounds.minZ; z <= bounds.maxZ + 1e-6; z += minorStep) {
+    const cmFromPrototype = Math.round(Math.abs(z) * 100);
+    const isMajor = cmFromPrototype % majorCm === 0;
+    group.add(makeLine(bounds.minX, z, bounds.maxX, z, isMajor ? majorMat : minorMat));
+  }
+
+  parent.add(group);
+}
+
+function addWallRulersAsymmetric({
+  parent,
+  bounds,
+  heightM,
+  wallThickness = 0.05,
+  minorCm = 10,
+  majorCm = 50,
+  surfaceOffset = 0.002,
+}) {
+  if (!parent || !bounds) return;
+
+  const group = new THREE.Group();
+  const minorStep = minorCm / 100;
+
+  const minorMat = new THREE.LineBasicMaterial({
+    color: 0x00e5ff,
+    transparent: true,
+    opacity: 0.16,
+  });
+
+  const majorMat = new THREE.LineBasicMaterial({
+    color: 0x00e5ff,
+    transparent: true,
+    opacity: 0.3,
+  });
+
+  const makeHorizontalX = (x1, x2, y, z, material) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x1, y, z),
+      new THREE.Vector3(x2, y, z),
+    ]);
+    return new THREE.Line(geo, material);
+  };
+
+  const makeHorizontalZ = (x, y, z1, z2, material) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x, y, z1),
+      new THREE.Vector3(x, y, z2),
+    ]);
+    return new THREE.Line(geo, material);
+  };
+
+  for (let y = 0; y <= heightM + 1e-6; y += minorStep) {
+    const cm = Math.round(y * 100);
+    const mat = cm % majorCm === 0 ? majorMat : minorMat;
+
+    group.add(
+      makeHorizontalX(
+        bounds.minX,
+        bounds.maxX,
+        y,
+        bounds.minZ + wallThickness / 2 + surfaceOffset,
+        mat
+      )
+    );
+    group.add(
+      makeHorizontalX(
+        bounds.minX,
+        bounds.maxX,
+        y,
+        bounds.maxZ - wallThickness / 2 - surfaceOffset,
+        mat
+      )
+    );
+    group.add(
+      makeHorizontalZ(
+        bounds.minX + wallThickness / 2 + surfaceOffset,
+        y,
+        bounds.minZ,
+        bounds.maxZ,
+        mat
+      )
+    );
+    group.add(
+      makeHorizontalZ(
+        bounds.maxX - wallThickness / 2 - surfaceOffset,
+        y,
+        bounds.minZ,
+        bounds.maxZ,
+        mat
+      )
+    );
+  }
+
+  parent.add(group);
+}
+
+/* =========================
    RECOMMENDATION CONTENT
 ========================= */
 const TREATMENT = {
@@ -177,28 +392,54 @@ const TREATMENT = {
 export default function Slide2({ rowsFor3D, spatial }) {
   const hasData = Array.isArray(rowsFor3D) && rowsFor3D.length > 0;
 
-  // ✅ NEW: qualification gate
-  const isQualified = spatial?.qualified === true;
-
   const [focusClass, setFocusClass] = useState("all");
   const [showGuide, setShowGuide] = useState(false);
-
   const [applied, setApplied] = useState({ hotspot: false, deadspot: false });
   const [viewMode, setViewMode] = useState("before");
 
   const counts = useMemo(() => {
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
-    let hot = 0,
-      dead = 0,
-      neutral = 0;
+    let hot = 0;
+    let dead = 0;
+    let neutral = 0;
+
     for (const r of rows) {
       const cls = normClass(getField(r, "Classification") ?? "");
       if (cls.includes("hot")) hot++;
       else if (cls.includes("dead")) dead++;
       else neutral++;
     }
+
     return { hot, dead, neutral, total: rows.length };
   }, [rowsFor3D]);
+
+  const baseRt60Average = useMemo(() => {
+    const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
+    const nums = rows
+      .map((r) => toNumber(getField(r, "RT60", "Reverberation")))
+      .filter((n) => Number.isFinite(n));
+
+    if (!nums.length) return null;
+    const sum = nums.reduce((a, b) => a + b, 0);
+    return sum / nums.length;
+  }, [rowsFor3D]);
+
+  const adjustedRt60Average = useMemo(() => {
+    if (baseRt60Average == null) return null;
+
+    let avg = baseRt60Average;
+    if (applied.hotspot) avg -= 0.08;
+    if (applied.deadspot) avg += 0.08;
+
+    return Math.max(0, avg);
+  }, [baseRt60Average, applied]);
+
+  const rt60Status = useMemo(() => {
+    if (adjustedRt60Average == null) return "—";
+    if (adjustedRt60Average > 0.4) return "Hotspot";
+    if (adjustedRt60Average < 0.3) return "Deadspot";
+    return "Balanced";
+  }, [adjustedRt60Average]);
 
   const filteredRows = useMemo(() => {
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
@@ -208,7 +449,9 @@ export default function Slide2({ rowsFor3D, spatial }) {
     return rows.filter((r) => normClass(getField(r, "Classification")).includes(want));
   }, [rowsFor3D, focusClass]);
 
-  useEffect(() => setViewMode("before"), [focusClass]);
+  useEffect(() => {
+    setViewMode("before");
+  }, [focusClass]);
 
   const activeTreat =
     focusClass === "hotspot"
@@ -218,33 +461,38 @@ export default function Slide2({ rowsFor3D, spatial }) {
       : null;
 
   const isApplied =
-    focusClass === "hotspot" ? applied.hotspot : focusClass === "deadspot" ? applied.deadspot : false;
+    focusClass === "hotspot"
+      ? applied.hotspot
+      : focusClass === "deadspot"
+      ? applied.deadspot
+      : false;
 
-  // ✅ NEW: only allow treatment when qualified
-  const canTreat = hasData && focusClass !== "all" && isQualified;
+  const canTreat = hasData && focusClass !== "all";
 
   const applyTreatment = () => {
     if (!canTreat) return;
+
     setApplied((prev) => {
       if (focusClass === "hotspot") return { ...prev, hotspot: true };
       if (focusClass === "deadspot") return { ...prev, deadspot: true };
       return prev;
     });
+
     setViewMode("after");
   };
 
   return (
     <div className="sim-slide sim-slide-2">
       <div className="sim-row sim-row-2">
-        {/* LEFT */}
         <div className="glass-card glass-card--bigLeft">
           <div className="sim3d-card sim3d-card--three">
             <ThreeRoom
               rowsFor3D={filteredRows}
+              allRows={rowsFor3D || []}
               spatial={spatial}
               focusClass={focusClass}
               viewMode={viewMode}
-              isApplied={isApplied && isQualified}
+              isApplied={isApplied}
             />
 
             <div className="three-legend">
@@ -284,10 +532,37 @@ export default function Slide2({ rowsFor3D, spatial }) {
                 Layer 1 (bottom) → Layer 4 (top)
               </div>
             </div>
+
+            <div
+              style={{
+                position: "absolute",
+                right: 18,
+                top: 18,
+                minWidth: 180,
+                padding: "12px 14px",
+                borderRadius: 14,
+                background: "rgba(18, 24, 38, 0.78)",
+                color: "#fff",
+                zIndex: 25,
+                boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+                pointerEvents: "none",
+              }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>RT60 STATUS</div>
+
+              <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
+                {adjustedRt60Average == null ? "—" : adjustedRt60Average.toFixed(3)}
+              </div>
+
+              <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>Target: 0.3 – 0.4</div>
+
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                Status: <b>{rt60Status}</b>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* RIGHT */}
         <div className="glass-card glass-card--recommend">
           <h2 className="card-title card-title--recommend">RECOMMENDATION</h2>
 
@@ -337,13 +612,12 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   Please import and deploy your data in <b>Slide 1</b> first.
                 </div>
               </div>
-            ) : !isQualified ? (
+            ) : focusClass === "all" ? (
               <div className="info-card">
-                <div className="info-title" style={{ color: "#ff4d4d" }}>
-                  No Recommendation
-                </div>
+                <div className="info-title">Select one to continue</div>
                 <div className="info-text">
-                  The room is <b>NOT QUALIFIED</b>. Simulation is available, but recommendations are disabled.
+                  Choose <b>Hotspot</b> or <b>Deadspot</b> to show the recommended treatment and
+                  apply preview.
                 </div>
               </div>
             ) : (
@@ -354,82 +628,87 @@ export default function Slide2({ rowsFor3D, spatial }) {
                   </div>
 
                   <div className="select-actions">
-                    <button type="button" className="select-btn" onClick={() => setFocusClass("hotspot")}>
+                    <button
+                      type="button"
+                      className="select-btn"
+                      onClick={() => setFocusClass("hotspot")}
+                    >
                       Select Hotspot
                     </button>
-                    <button type="button" className="select-btn" onClick={() => setFocusClass("deadspot")}>
+                    <button
+                      type="button"
+                      className="select-btn"
+                      onClick={() => setFocusClass("deadspot")}
+                    >
                       Select Deadspot
                     </button>
-                    <button type="button" className="select-btn" onClick={() => setFocusClass("all")}>
+                    <button
+                      type="button"
+                      className="select-btn"
+                      onClick={() => setFocusClass("all")}
+                    >
                       Show All
                     </button>
                   </div>
 
-                  <div className="select-hint">You can also click the Legend inside the 3D panel.</div>
+                  <div className="select-hint">
+                    You can also click the Legend inside the 3D panel.
+                  </div>
                 </div>
 
-                {focusClass === "all" ? (
-                  <div className="info-card">
-                    <div className="info-title">Select one to continue</div>
-                    <div className="info-text">
-                      Choose <b>Hotspot</b> or <b>Deadspot</b> to show the recommended treatment and apply preview.
+                {activeTreat && (
+                  <div className="treat-card">
+                    <div className="treat-title">{activeTreat.title}</div>
+
+                    <div className="treat-main">
+                      <div className="treat-badge">{activeTreat.fixed.label}</div>
+                      <div className="treat-desc">{activeTreat.fixed.desc}</div>
                     </div>
-                  </div>
-                ) : (
-                  activeTreat && (
-                    <div className="treat-card">
-                      <div className="treat-title">{activeTreat.title}</div>
 
-                      <div className="treat-main">
-                        <div className="treat-badge">{activeTreat.fixed.label}</div>
-                        <div className="treat-desc">{activeTreat.fixed.desc}</div>
-                      </div>
+                    <div className="treat-actions">
+                      <button
+                        type="button"
+                        className="apply-btn"
+                        onClick={applyTreatment}
+                        disabled={!canTreat || isApplied}
+                      >
+                        {isApplied ? "Applied ✓" : "Apply Treatment"}
+                      </button>
 
-                      <div className="treat-actions">
+                      <div className="compare-toggle">
                         <button
                           type="button"
-                          className="apply-btn"
-                          onClick={applyTreatment}
-                          disabled={!canTreat || isApplied}
+                          className={`compare-btn ${viewMode === "before" ? "on" : ""}`}
+                          onClick={() => setViewMode("before")}
                         >
-                          {isApplied ? "Applied ✓" : "Apply Treatment"}
+                          Before
                         </button>
-
-                        <div className="compare-toggle">
-                          <button
-                            type="button"
-                            className={`compare-btn ${viewMode === "before" ? "on" : ""}`}
-                            onClick={() => setViewMode("before")}
-                          >
-                            Before
-                          </button>
-                          <button
-                            type="button"
-                            className={`compare-btn ${viewMode === "after" ? "on" : ""}`}
-                            onClick={() => setViewMode("after")}
-                            disabled={!isApplied}
-                          >
-                            After
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="recommend-card" style={{ marginTop: 14 }}>
-                        <div className="recommend-card-title">Available Types (PH-friendly)</div>
-
-                        <div className="recommend-list" style={{ marginTop: 10 }}>
-                          {activeTreat.fixed.options.map((o) => (
-                            <div className="recommend-item" key={o.name}>
-                              <div className="recommend-item-name">{o.name}</div>
-                              <div className="recommend-item-text">{o.text}</div>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="treat-footnote">{activeTreat.fixed.footnote}</div>
+                        <button
+                          type="button"
+                          className={`compare-btn ${viewMode === "after" ? "on" : ""}`}
+                          onClick={() => setViewMode("after")}
+                          disabled={!isApplied}
+                        >
+                          After
+                        </button>
                       </div>
                     </div>
-                  )
+
+                    <div className="recommend-card" style={{ marginTop: 14 }}>
+                      <div className="recommend-card-title">Available Types (PH-friendly)</div>
+
+                      <div className="recommend-list" style={{ marginTop: 10 }}>
+                        {activeTreat.fixed.options.map((o) => (
+                          <div className="recommend-item" key={o.name}>
+                            <div className="recommend-item-name">{o.name}</div>
+                            <div className="recommend-item-text">{o.text}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="treat-footnote">{activeTreat.fixed.footnote}</div>
+                    </div>
+                  </div>
                 )}
               </>
             )}
@@ -444,93 +723,19 @@ export default function Slide2({ rowsFor3D, spatial }) {
 }
 
 /* =========================
-   SAFE GRID + WALL RULER HELPERS
-   (Prevents blank screen if missing)
-========================= */
-
-function addMeasurementGridCm({
-  parent,
-  lengthM,
-  widthM,
-  originX = 0,
-  originZ = 0,
-  minorCm = 10,
-  majorCm = 50,
-  y = 0.002,
-}) {
-  if (!parent) return;
-
-  const group = new THREE.Group();
-
-  const halfL = lengthM / 2;
-  const halfW = widthM / 2;
-
-  const minorM = minorCm / 100;
-  const majorM = majorCm / 100;
-
-  const minorMat = new THREE.LineBasicMaterial({
-    color: 0x00c8ff,
-    transparent: true,
-    opacity: 0.15,
-  });
-
-  const makeLine = (x1, z1, x2, z2) => {
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(x1, y, z1),
-      new THREE.Vector3(x2, y, z2),
-    ]);
-    return new THREE.Line(geo, minorMat);
-  };
-
-  for (let x = -halfL; x <= halfL; x += minorM) {
-    group.add(makeLine(x, -halfW, x, halfW));
-  }
-
-  for (let z = -halfW; z <= halfW; z += minorM) {
-    group.add(makeLine(-halfL, z, halfL, z));
-  }
-
-  parent.add(group);
-}
-
-function addWallRulersCm({
-  parent,
-  lengthM,
-  widthM,
-  heightM,
-  wallThickness = 0.05,
-}) {
-  if (!parent) return;
-
-  const group = new THREE.Group();
-
-  const mat = new THREE.LineBasicMaterial({
-    color: 0x00e5ff,
-    transparent: true,
-    opacity: 0.25,
-  });
-
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-lengthM / 2, 0, -widthM / 2),
-    new THREE.Vector3(-lengthM / 2, heightM, -widthM / 2),
-  ]);
-
-  group.add(new THREE.Line(geo, mat));
-  parent.add(group);
-}
-
-/* =========================
    THREE ROOM
 ========================= */
-function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isApplied }) {
+function ThreeRoom({
+  rowsFor3D = [],
+  allRows = [],
+  spatial = {},
+  focusClass,
+  viewMode,
+  isApplied,
+}) {
   const mountRef = useRef(null);
   const [tip, setTip] = useState({ show: false, x: 0, y: 0, text: "" });
   const [status, setStatus] = useState("Initializing 3D…");
-
-  const [padReadyTick, setPadReadyTick] = useState(0);
-  const [protoReadyTick, setProtoReadyTick] = useState(0);
-
-  const [measureOrigin, setMeasureOrigin] = useState({ x: 0, z: 0 });
 
   const threeRef = useRef({
     renderer: null,
@@ -559,6 +764,12 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
     loaded: false,
     fallbackBox: null,
   });
+
+  const boundsRef = useRef(null);
+  const cameraInitializedRef = useRef(false);
+
+  const [padReadyTick, setPadReadyTick] = useState(0);
+  const [protoReadyTick, setProtoReadyTick] = useState(0);
 
   const matsRef = useRef({
     hot: new THREE.MeshStandardMaterial({
@@ -669,7 +880,7 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
 
         const hits = raycasterRef.current.intersectObjects(padsGroup.children, false);
         if (!hits.length) {
-          if (tip.show) setTip((t) => ({ ...t, show: false }));
+          setTip((t) => (t.show ? { ...t, show: false } : t));
           lastText.current = "";
           return;
         }
@@ -689,11 +900,15 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
           `Classification: ${getField(row, "Classification") ?? "-"}`,
         ].join("\n");
 
-        if (text !== lastText.current || !tip.show) {
+        if (text !== lastText.current) {
           lastText.current = text;
           setTip({ show: true, x: mx + 14, y: my + 14, text });
         } else {
-          setTip((t) => ({ ...t, x: mx + 14, y: my + 14 }));
+          setTip((t) =>
+            t.show
+              ? { ...t, x: mx + 14, y: my + 14 }
+              : { show: true, x: mx + 14, y: my + 14, text }
+          );
         }
       });
     };
@@ -717,75 +932,18 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
     loop();
 
     return () => {
+      if (hoverRAF.current) cancelAnimationFrame(hoverRAF.current);
       cancelAnimationFrame(raf);
       ro.disconnect();
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerleave", onLeave);
       controls.dispose();
       renderer.dispose();
-      if (renderer.domElement && mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
+      if (renderer.domElement && mount.contains(renderer.domElement)) {
+        mount.removeChild(renderer.domElement);
+      }
     };
   }, []);
-
-  /* ---------- ROOM ---------- */
-  useEffect(() => {
-    const { roomGroup } = threeRef.current;
-    if (!roomGroup) return;
-
-    roomGroup.clear();
-
-    const lengthM =
-      spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
-    const widthM =
-      spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
-    const heightCm = toNumber(spatial?.heightRaw);
-    const heightM = heightCm != null ? heightCm / 100 : 2.6;
-
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(lengthM, widthM), matsRef.current.floor);
-    floor.rotation.x = -Math.PI / 2;
-    roomGroup.add(floor);
-
-    const thickness = 0.05;
-    const wallMat = matsRef.current.wall;
-
-    const wall1 = new THREE.Mesh(new THREE.BoxGeometry(lengthM, heightM, thickness), wallMat);
-    wall1.position.set(0, heightM / 2, -widthM / 2);
-    roomGroup.add(wall1);
-
-    const wall2 = new THREE.Mesh(new THREE.BoxGeometry(lengthM, heightM, thickness), wallMat);
-    wall2.position.set(0, heightM / 2, widthM / 2);
-    roomGroup.add(wall2);
-
-    const wall3 = new THREE.Mesh(new THREE.BoxGeometry(thickness, heightM, widthM), wallMat);
-    wall3.position.set(-lengthM / 2, heightM / 2, 0);
-    roomGroup.add(wall3);
-
-    const wall4 = new THREE.Mesh(new THREE.BoxGeometry(thickness, heightM, widthM), wallMat);
-    wall4.position.set(lengthM / 2, heightM / 2, 0);
-    roomGroup.add(wall4);
-
-    addMeasurementGridCm({
-      parent: roomGroup,
-      lengthM,
-      widthM,
-      originX: measureOrigin.x,
-      originZ: measureOrigin.z,
-      minorCm: 10,
-      majorCm: 50,
-      y: 0.002,
-    });
-
-    addWallRulersCm({
-      parent: roomGroup,
-      lengthM,
-      widthM,
-      heightM,
-      wallThickness: thickness,
-      minorCm: 10,
-      majorCm: 50,
-      surfaceOffset: 0.002,
-    });
-  }, [spatial, measureOrigin]);
 
   /* ---------- LOAD PAD ---------- */
   useEffect(() => {
@@ -861,6 +1019,8 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
         protoGroup.clear();
         protoGroup.add(mesh);
 
+        mesh.position.set(0, 0, 0);
+
         protoRef.current.mesh = mesh;
         protoRef.current.loaded = true;
 
@@ -879,14 +1039,105 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
     };
   }, []);
 
-  /* ---------- BUILD PADS (SENSOR MAPPING + FACE PROTOTYPE) ---------- */
+  /* ---------- ROOM (FROM FULL DATASET, NOT FILTERED) ---------- */
   useEffect(() => {
-    const { padsGroup, camera, controls } = threeRef.current;
-    if (!padsGroup || !camera || !controls) return;
+    const { roomGroup } = threeRef.current;
+    if (!roomGroup) return;
+
+    roomGroup.clear();
+
+    const bounds = computeRoomBoundsFromRows(allRows, spatial);
+    boundsRef.current = bounds;
+
+    const heightCm = toNumber(spatial?.heightRaw);
+    const heightM = heightCm != null ? heightCm / 100 : 2.7;
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(bounds.lengthM, bounds.widthM),
+      matsRef.current.floor
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(bounds.centerX, 0, bounds.centerZ);
+    roomGroup.add(floor);
+
+    const thickness = 0.05;
+    const wallMat = matsRef.current.wall;
+
+    const northWall = new THREE.Mesh(
+      new THREE.BoxGeometry(bounds.lengthM, heightM, thickness),
+      wallMat
+    );
+    northWall.position.set(bounds.centerX, heightM / 2, bounds.minZ);
+    roomGroup.add(northWall);
+
+    const southWall = new THREE.Mesh(
+      new THREE.BoxGeometry(bounds.lengthM, heightM, thickness),
+      wallMat
+    );
+    southWall.position.set(bounds.centerX, heightM / 2, bounds.maxZ);
+    roomGroup.add(southWall);
+
+    const westWall = new THREE.Mesh(
+      new THREE.BoxGeometry(thickness, heightM, bounds.widthM),
+      wallMat
+    );
+    westWall.position.set(bounds.minX, heightM / 2, bounds.centerZ);
+    roomGroup.add(westWall);
+
+    const eastWall = new THREE.Mesh(
+      new THREE.BoxGeometry(thickness, heightM, bounds.widthM),
+      wallMat
+    );
+    eastWall.position.set(bounds.maxX, heightM / 2, bounds.centerZ);
+    roomGroup.add(eastWall);
+
+    addMeasurementGridFromPrototype({
+      parent: roomGroup,
+      bounds,
+      y: 0.002,
+      minorCm: 10,
+      majorCm: 50,
+    });
+
+    addWallRulersAsymmetric({
+      parent: roomGroup,
+      bounds,
+      heightM,
+      wallThickness: thickness,
+      minorCm: 10,
+      majorCm: 50,
+      surfaceOffset: 0.002,
+    });
+  }, [allRows, spatial]);
+
+  /* ---------- CAMERA FIT (ONLY WHEN ROOM / MODELS CHANGE) ---------- */
+  useEffect(() => {
+    const { camera, controls } = threeRef.current;
+    if (!camera || !controls) return;
+    if (!padRef.current.ready) return;
+
+    const bounds = boundsRef.current || computeRoomBoundsFromRows(allRows, spatial);
+    if (!bounds) return;
+
+    const maxDim = Math.max(bounds.lengthM, bounds.widthM, 4.5);
+
+    camera.position.set(bounds.centerX, maxDim * 0.95, bounds.centerZ + maxDim * 1.15);
+    controls.target.set(bounds.centerX, 1.0, bounds.centerZ);
+    controls.update();
+
+    cameraInitializedRef.current = true;
+  }, [allRows, spatial, padReadyTick, protoReadyTick]);
+
+  /* ---------- BUILD FILTERED PADS ONLY ---------- */
+  useEffect(() => {
+    const { padsGroup } = threeRef.current;
+    if (!padsGroup) return;
 
     padsGroup.clear();
 
     const rows = Array.isArray(rowsFor3D) ? rowsFor3D : [];
+    const bounds = boundsRef.current || computeRoomBoundsFromRows(allRows, spatial);
+
     if (!rows.length) {
       setStatus("No data rows to deploy.");
       return;
@@ -899,73 +1150,34 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
 
     setStatus(`Deploying ${rows.length} pads…`);
 
-    const lengthM =
-      spatial?.lengthCm != null && Number.isFinite(spatial.lengthCm) ? spatial.lengthCm / 100 : 3;
-    const widthM =
-      spatial?.widthCm != null && Number.isFinite(spatial.widthCm) ? spatial.widthCm / 100 : 3;
-
-    const margin = 0.18;
-    const halfL = lengthM / 2 - margin;
-    const halfW = widthM / 2 - margin;
-
-    const maxDistCm =
-      Math.max(
-        ...rows.map((r) => toNumber(getField(r, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV")) ?? 0)
-      ) || 0;
-
-    const SPREAD = maxDistCm >= 20 ? 1 : 30;
-
-    const cols = Math.max(6, Math.ceil(Math.sqrt(rows.length)));
-    const cellX = (halfL * 2) / (cols + 1);
-    const cellZ = (halfW * 2) / (cols + 1);
-
-    let north = -Infinity,
-      south = Infinity,
-      east = -Infinity,
-      west = Infinity;
-
-    const centroid = new THREE.Vector3(0, 0, 0);
-    let count = 0;
-
     const PAD_WORLD_SIZE = 0.22;
-    const LAYER_STEP = 0.45;
-    const BASE_Y = 0.02;
+    const BASE_Y = 0.75;
+    const LAYER_STEP = 0.42;
+    const ANGLE_OFFSET_DEG = 0;
 
-    const selectedType = focusClass === "hotspot" ? "hot" : focusClass === "deadspot" ? "dead" : null;
-
-    const createdPads = [];
+    const selectedType =
+      focusClass === "hotspot" ? "hot" : focusClass === "deadspot" ? "dead" : null;
 
     rows.forEach((row, index) => {
-      const angleDeg = toNumber(getField(row, "Angle"));
+      const angleDeg = normalizeAngle360(toNumber(getField(row, "Angle")));
       const distCm = toNumber(getField(row, "Ultrasonic", "Distance", "Ultrasonic(cm)", "UTV"));
 
-      let x, z;
+      let x = 0;
+      let z = 0;
 
       if (angleDeg != null && distCm != null && distCm > 0) {
-        // ✅ SENSOR RULE:
-        // 0 = North (-Z), 90 = East (+X), 180 = South (+Z), 270 = West (-X)
-        const theta = (angleDeg * Math.PI) / 180;
-        const distM = (distCm / 100) * SPREAD;
+        const theta = ((angleDeg + ANGLE_OFFSET_DEG) * Math.PI) / 180;
+        const distM = distCm / 100;
 
-        x = THREE.MathUtils.clamp(Math.sin(theta) * distM, -halfL, halfL);
-        z = THREE.MathUtils.clamp(-Math.cos(theta) * distM, -halfW, halfW);
-      } else {
-        const r = Math.floor(index / cols);
-        const c = index % cols;
-        x = -halfL + cellX * (c + 1);
-        z = -halfW + cellZ * (r + 1);
+        x = Math.sin(theta) * distM;
+        z = -Math.cos(theta) * distM;
+
+        x = THREE.MathUtils.clamp(x, bounds.minX + 0.05, bounds.maxX - 0.05);
+        z = THREE.MathUtils.clamp(z, bounds.minZ + 0.05, bounds.maxZ - 0.05);
       }
 
       const layerIndex = parseLayerIndex(getField(row, "Layer") ?? "Layer 1");
       const y = BASE_Y + layerIndex * LAYER_STEP;
-
-      north = Math.max(north, z);
-      south = Math.min(south, z);
-      east = Math.max(east, x);
-      west = Math.min(west, x);
-
-      centroid.add(new THREE.Vector3(x, 0, z));
-      count++;
 
       const cls = normClass(getField(row, "Classification") ?? "neutral");
 
@@ -983,51 +1195,26 @@ function ThreeRoom({ rowsFor3D = [], spatial = {}, focusClass, viewMode, isAppli
       const padMesh = new THREE.Mesh(padRef.current.geom.clone(), baseMat);
       const finalScale = padRef.current.baseScale * PAD_WORLD_SIZE;
       padMesh.scale.setScalar(finalScale);
-
       padMesh.position.set(x, y, z);
       padMesh.userData = { row, index };
 
+      const dx = -x;
+      const dz = -z;
+      let yaw = Math.atan2(dx, dz);
+      yaw += padRef.current.fixYaw || 0;
+      padMesh.rotation.set(0, yaw, 0);
+
       padsGroup.add(padMesh);
-      createdPads.push(padMesh);
     });
 
-    // ✅ prototype at centroid
-    const c = count ? centroid.multiplyScalar(1 / count) : new THREE.Vector3(0, 0, 0);
-    const px = THREE.MathUtils.clamp(c.x, -halfL + 0.2, halfL - 0.2);
-    const pz = THREE.MathUtils.clamp(c.z, -halfW + 0.2, halfW - 0.2);
-
-    if (protoRef.current.mesh) protoRef.current.mesh.position.set(px, 0, pz);
-    else if (protoRef.current.fallbackBox) protoRef.current.fallbackBox.position.set(px, 0.125, pz);
-
-    setMeasureOrigin({ x: px, z: pz });
-
-    // ✅ make each pad face the prototype
-    for (const pad of createdPads) {
-      const dx = px - pad.position.x;
-      const dz = pz - pad.position.z;
-
-      // yaw 0 faces +Z (three.js convention)
-      let yaw = Math.atan2(dx, dz);
-
-      // add STL forward-axis correction
-      yaw += padRef.current.fixYaw || 0;
-
-      pad.rotation.set(0, yaw, 0);
+    if (protoRef.current.mesh) {
+      protoRef.current.mesh.position.set(0, 0, 0);
+    } else if (protoRef.current.fallbackBox) {
+      protoRef.current.fallbackBox.position.set(0, 0.125, 0);
     }
 
-    // camera framing
-    const roomWidth = east - west + 0.6;
-    const roomDepth = north - south + 0.6;
-    const cx = (east + west) / 2;
-    const cz = (north + south) / 2;
-
-    const maxDim = Math.max(roomWidth, roomDepth, 3);
-    camera.position.set(cx, maxDim * 0.9, cz + maxDim * 1.3);
-    controls.target.set(cx, 1.1, cz);
-    controls.update();
-
     setStatus(`Deployed ✅ ${rows.length} pads`);
-  }, [rowsFor3D, spatial, padReadyTick, protoReadyTick, focusClass, viewMode, isApplied]);
+  }, [rowsFor3D, allRows, spatial, padReadyTick, protoReadyTick, focusClass, viewMode, isApplied]);
 
   return (
     <div ref={mountRef} className="three-mount" style={{ position: "relative" }}>

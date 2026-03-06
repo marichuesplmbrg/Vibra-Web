@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./Slide1.css";
 
 /* =========================
@@ -109,6 +109,18 @@ function normalizeAngleForLayer(angleStr, layerLabel) {
   return String(angleStr ?? "").trim();
 }
 
+function toNumber(value) {
+  const n = Number(String(value ?? "").replace(/[^\d.\-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeClassLabel(v) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
 export default function Slide1({
   rawRows,
   setRawRows,
@@ -124,28 +136,19 @@ export default function Slide1({
   spatial,
   uploadStatus,
   setUploadStatus,
+
+  // ✅ NEW: pass these from parent/App
+  treatmentApplied = { hotspot: false, deadspot: false },
 }) {
   const [showImport, setShowImport] = useState(false);
   const [showSort, setShowSort] = useState(false);
   const fileInputRef = useRef(null);
-
-  // ✅ NEW: NOT QUALIFIED popup timer
-  const [showNotQualified, setShowNotQualified] = useState(false);
 
   useEffect(() => {
     if (uploadStatus.type === "idle") return;
     const timer = setTimeout(() => setUploadStatus({ type: "idle", message: "" }), 5000);
     return () => clearTimeout(timer);
   }, [uploadStatus, setUploadStatus]);
-
-  // ✅ NEW: show popup when room becomes not qualified
-  useEffect(() => {
-    if (spatial?.qualified === false && spatial?.area != null) {
-      setShowNotQualified(true);
-      const t = setTimeout(() => setShowNotQualified(false), 4000);
-      return () => clearTimeout(t);
-    }
-  }, [spatial?.qualified, spatial?.area]);
 
   const handleImportCloud = async () => {
     try {
@@ -276,8 +279,46 @@ export default function Slide1({
   const formatCm = (cm) => (cm == null ? "—" : `${cm.toFixed(1)} cm`);
   const formatArea = (a) => (a == null ? "—" : `${a.toFixed(2)} m²`);
 
-  const statusText =
-    spatial.qualified == null ? "—" : spatial.qualified ? "Qualified" : "Not Qualified";
+  const rt60Average = useMemo(() => {
+    const nums = rawRows
+      .map((r) => toNumber(r.RT60))
+      .filter((n) => Number.isFinite(n));
+
+    if (!nums.length) return null;
+
+    const sum = nums.reduce((a, b) => a + b, 0);
+    return sum / nums.length;
+  }, [rawRows]);
+
+  // ✅ simulated average after treatment
+  const adjustedRt60Average = useMemo(() => {
+    if (rt60Average == null) return null;
+
+    let next = rt60Average;
+
+    // adjust these values if you want stronger/weaker effect
+    if (treatmentApplied.hotspot) next -= 0.08;
+    if (treatmentApplied.deadspot) next += 0.08;
+
+    return Math.max(0, next);
+  }, [rt60Average, treatmentApplied]);
+
+  const resultFromAverage = useMemo(() => {
+    const avg = adjustedRt60Average;
+    if (avg == null) return "—";
+    if (avg > 0.4) return "Hotspot";
+    if (avg < 0.3) return "Deadspot";
+    return "Qualified";
+  }, [adjustedRt60Average]);
+
+  const displayedResultText =
+    treatmentApplied.hotspot || treatmentApplied.deadspot
+      ? resultFromAverage
+      : spatial.qualified == null
+      ? "—"
+      : spatial.qualified
+      ? "Qualified"
+      : "Not Qualified";
 
   return (
     <div className="sim-slide sim-slide-1">
@@ -446,13 +487,6 @@ export default function Slide1({
 
           <p className="label">PHYSICAL DIMENSION:</p>
 
-          {/* ✅ NEW POPUP INSIDE SPATIAL BOX */}
-          {showNotQualified && (
-            <div className="not-qualified-popup">
-              ⚠ NOT QUALIFIED
-            </div>
-          )}
-
           <div className="dimension-input">
             <span className="dimension-text">Length: {formatCm(spatial.lengthCm)}</span>
           </div>
@@ -475,11 +509,23 @@ export default function Slide1({
                 <div className="status-line">
                   <span>Area:</span> <b>{formatArea(spatial.area)}</b>
                 </div>
+
                 <div className="status-line">
-                  <span>Result:</span> <b>{statusText}</b>
+                  <span>Result:</span> <b>{displayedResultText}</b>
+                </div>
+
+                <div className="status-line">
+                  <span>RT60 Average:</span>{" "}
+                  <b>
+                    {adjustedRt60Average == null ? "—" : adjustedRt60Average.toFixed(3)}
+                  </b>
+                </div>
+
+                <div className="status-hint">
+                  Target RT60 after treatment: <b>0.3–0.4</b>.
                 </div>
                 <div className="status-hint">
-                  Qualified if floor area is <b>3–5 m²</b>.
+                  Above <b>0.4</b> = Hotspot, below <b>0.3</b> = Deadspot.
                 </div>
               </div>
             </div>
